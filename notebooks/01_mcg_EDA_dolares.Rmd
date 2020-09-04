@@ -34,14 +34,8 @@ base <- read_excel(paste0(raw_data,"/Base Datos.xlsx"),
 head(base)
 ```
 
-Extrayendo la base de colones y de dolares
+Extrayendo la base de dolares y de dolares
 ```{r}
-
-colones <- data_frame(date = base$`Activo neto`,
-                  col =  as.double(base$CRC)) %>%
-  mutate(date = ymd(paste0(date, "-01"))) %>%
-  mutate(year = as.factor(year(date)),
-         month = as.factor(month(date)))
 
 dolares <- tibble(date = base$`Activo neto`,
                   dol =  base$USD) %>%
@@ -50,28 +44,10 @@ dolares <- tibble(date = base$`Activo neto`,
          month = as.factor(month(date)))
 
 head(dolares)
-head(colones)
 ```
 
 Convirtiendo los datos a series de tiempo
 ```{r}
-# Colones
-
-# 6 periodos para utilizar a modo de validación
-colones_val <- colones %>% 
-  slice_tail(n = 6)
-
-# Serie completa para el analisis exploratorio
-colones_full <- colones
-
-# 10 años de datos para modelar
-colones <- colones %>% 
-  filter(date>"2009-12-01")
-
-# Objetos ts tanto para la serie completa como para la serie de modelado
-colones_ts_full <- ts(colones_full$col, start = c(2001,2), frequency = 12)
-colones_ts <- ts(colones$col, start = c(2010,1), frequency = 12)
-
 # Dolares
 
 # 6 periodos para utilizar a modo de validación
@@ -96,10 +72,10 @@ dolares_ts <- ts(dolares$dol, start = c(2010,1), frequency = 12)
 # 1 - Analisis exploratorio
 
 ## 1.1 - Exploracion de datos 
-## Colones
+## dolares
 
 ```{r  warning=FALSE}
-plot_histogram(colones$col)
+plot_histogram(dolares$dol)
 
 
 
@@ -107,25 +83,25 @@ plot_histogram(colones$col)
 
 ```{r}
 
-colones %>% 
-  summarise(across(col, list(media = mean, minimo = min, maximo = max, desv = sd),.names = "{.fn}")) %>% 
+dolares %>% 
+  summarise(across(dol, list(media = mean, minimo = min, maximo = max, desv = sd),.names = "{.fn}")) %>% 
   kbl() %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
 
-colones %>% 
+dolares %>% 
   group_by(year) %>% 
-  summarise(across(col, list(media = mean, minimo = min, maximo = max, desv = sd),.names = "{.fn}")) %>% 
+  summarise(across(dol, list(media = mean, minimo = min, maximo = max, desv = sd),.names = "{.fn}")) %>% 
   kbl() %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
 
-colones %>% 
+dolares %>% 
   group_by(month) %>% 
-  summarise(across(col, list(media = mean, minimo = min, maximo = max, desv = sd),.names = "{.fn}")) %>% 
+  summarise(across(dol, list(media = mean, minimo = min, maximo = max, desv = sd),.names = "{.fn}")) %>% 
   kbl() %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
 
 ```
-La media del total de fondos es de 386557.8 y varía entre 11067.66 y 1023249 con una
+La media del total de fondos es de 951.8673 y varía entre 525.4682 y 1517.918 con una
 desviación estandar de  272344.6.
 
 Se puede apreciar que el promedio anual de fondos se mantiene creciendo desde el primer año
@@ -133,36 +109,36 @@ y se duplica cada aproximadamente 5 años y es claro que en el 2020 hay un aumen
 considerable en el promedio pues para de esta alrededor de 650 mil a pasar a casi
 900mil. 
 
-Por otro lado, cuando vemos los estadísticos por cada mes, se observa que claramente la temporada de fin de año (noviembre y diciembre) tiene un promedio mas bajo que el resto en contraste con
-los meses de enero y julio en donde hay mayores promedios. Esto puede evidenciar
+Por otro lado, cuando vemos los estadísticos por cada mes, se observa que claramente la temporada de fin de año (diciembre) tiene un promedio mas bajo que el resto en contraste con
+los meses de mayo a julio en donde hay mayores promedios. Esto puede evidenciar
 salidas de dinero en los meses de mas consumo como son las vacaciones de diciembre
-y las de mediados de año que vienen seguidas por un aumento pues se vuelve a colocar
-el dinero en los fondos. 
+y a de mediados de año que se produce un aumento por la temporada de verano en los paises 
+del norte. 
 
 
 ## 1.2 - Analisis de valores extremos
 
 ```{r echo=FALSE}
-outliers::outlier(colones_ts, opposite = FALSE, logical = FALSE)
+outliers::outlier(dolares_ts, opposite = FALSE, logical = FALSE)
 #no se rechaza
-grubbs.test(colones_ts, type = 10, opposite = FALSE, two.sided = TRUE) # one outlier
+grubbs.test(dolares_ts, type = 10, opposite = FALSE, two.sided = TRUE) # one outlier
 #se rechaza
-chisq.out.test(colones_ts, opposite = FALSE)
+chisq.out.test(dolares_ts, opposite = FALSE)
 
 ```
 
-Después de hacer el análisis de valores extremos, una de las 2 pruebas se rechaza (chi cuadrado) que determina que el valor 1023248.6231 (Julio del 2020) es un valor extremo. Aunque si lo vemos en el contexto y particularmente comparado con los otros meses de Julio se aprecia que en general tienen valores altos. Por esto y sumado a que es una serie que viene en constante crecimiento a largo del 
+Después de hacer el análisis de valores extremos, una de las 2 pruebas se rechaza (chi cuadrado) que determina que el valor 1517.9182 (Julio del 2020) es un valor extremo. Aunque si lo vemos en el contexto y particularmente comparado con los otros meses de Julio se aprecia que en general tienen valores altos. Por esto y sumado a que es una serie que viene en constante crecimiento a largo del 
 año se mantiene el valor para el resto del análisis. 
 
 ## 1.3 - Primeros graficos
 ```{r warning=FALSE}
 #GRAFICO ACCIDENTES
-plot.ts(colones_ts_full,ylab='Cantidad de accidentes',xlab="Periodo",main="Cantidad de accidentes de transito por mes\n(2000 - 2019)", lty=5,col="darkgray",bty="l",lwd=3)
+plot.ts(dolares_ts_full,ylab='Cantidad de accidentes',xlab="Periodo",main="Cantidad de accidentes de transito por mes\n(2000 - 2019)", lty=5,col="darkgray",bty="l",lwd=3)
 Month=c('J','F','M','A','M','J','J','A','S','O','N','D')
-points(colones_ts_full,pch=Month,col="blue")
+points(dolares_ts_full,pch=Month,col="blue")
 
 
-autoplot(colones_ts_full)+
+autoplot(dolares_ts_full)+
  # geom_point(Month)+
   scale_x_date(date_labels="%Y",date_breaks  ="2 year")+
   labs(title = "Cantidad de accidentes de transito por mes\n(2000 - 2019)",
@@ -181,19 +157,19 @@ autoplot(colones_ts_full)+
 ### 1.3.1 - Analisis por mes
 ```{r  warning=FALSE}
 
-seasonplot(colones_ts_full,col=viridis::viridis(12),year.labels=TRUE, main = "Cantidad de accidentes de transito por mes y año\n(2000 - 2019)")
+seasonplot(dolares_ts_full,col=viridis::viridis(20),year.labels=TRUE, main = "Cantidad de accidentes de transito por mes y año\n(2000 - 2019)")
 
-monthplot(colones_ts_full,col="blue", main= "Cantidad de accidentes de transito por mes\n(2000 - 2019)")
+monthplot(dolares_ts_full,col="blue", main= "Cantidad de accidentes de transito por mes\n(2000 - 2019)")
 
 ```
 
 En el gráfico se puede observar que hay tendencia de aumento a través de los casi 19 años
-analizados, y se aprecia que hubo un aumento considerable entre los años 2008 y 2010
+analizados, y se aprecia que hubo un aumento considerable cercano al 2008 
 lo que se podría interpretar como una respuesta a la crisis del 2008 y luego hubo otro aumento 
 cerca del 2014-2015 lo que se relaciona con la crisis @@@ y por último el aumento 
 a partir de abril del 2020 lo cual es evidente que es a causa del COVID-19. 
 En términos de estacionalidad se observa que efectivamente el promedio durante Noviembre y
-Diciembre decrece y sube en Enero y Julio. También se observa que si bien no hay muchas
+Diciembre decrece y sube entre Mayo y Julio. También se observa que si bien no hay muchas
 diferencias de mes a mes si hay mucha variabilidad y no hay excepciones en el crecimiento
 continuo.
 Además, debido a que la variabilidad de la serie parece mantenerse a través del tiempo es posible sospechar que la serie es aditiva, por lo tanto, la descomposición se hará partiendo de esto. 
@@ -202,34 +178,33 @@ Además, debido a que la variabilidad de la serie parece mantenerse a través de
 ## 1.4 - Descomposición de la serie (aditiva)
 
 ```{r  warning=FALSE}
-decompose_colones_full = decompose(colones_ts_full, "additive")
+decompose_dolares_full = decompose(dolares_ts_full, "additive")
 
-plot(as.ts(decompose_colones_full$seasonal), xlab="", ylab="Componente estacional", main= "Activo neto de los fondos del mercado de dinero\n(2001 - 2020)")
-plot(as.ts(decompose_colones_full$trend), xlab="", ylab="Componente tendencia",  main= "Activo neto de los fondos del mercado de dinero\n(2001 - 2020)")
-plot(as.ts(decompose_colones_full$random), xlab="", ylab="Componente aleatorio",  main= "Activo neto de los fondos del mercado de dinero\n(2001 - 2020)")
-plot(decompose_colones_full, xlab="")
+plot(as.ts(decompose_dolares_full$seasonal), xlab="", ylab="Componente estacional", main= "Activo neto de los fondos del mercado de dinero\n(2001 - 2020)")
+plot(as.ts(decompose_dolares_full$trend), xlab="", ylab="Componente tendencia",  main= "Activo neto de los fondos del mercado de dinero\n(2001 - 2020)")
+plot(as.ts(decompose_dolares_full$random), xlab="", ylab="Componente aleatorio",  main= "Activo neto de los fondos del mercado de dinero\n(2001 - 2020)")
+plot(decompose_dolares_full, xlab="")
 
 ```
 
 Se aprecia en el primer gráfico que la serie es altamente estacional pues se presenta un patrón regular en forma reiterada. Por otro lado, se observa que la tendencia, aunque mayormente creciente, posee cierta ciclicidad pues posee un pico pronunciado alrededor del año 2008, del 2014 y del 2020. Finalmente, el componente aleatorio es altamente variable pero se observa que la variabilidad va en aumento 
-conforme pasa el tiempo y sobretodo a partir del 2014 por lo tanto se procede a descomponer 
+conforme pasa el tiempo y sobretodo a partir del 2008 por lo tanto se procede a descomponer 
 la serie pero esta vez multiplicativa. 
 
 ## 1.4 - Descomposición de la serie (multiplicativa)
 
 ```{r  warning=FALSE}
-decompose_colones_full = decompose(colones_ts_full, "multiplicative")
+decompose_dolares_full2 = decompose(dolares_ts_full, "multiplicative")
 
-plot(as.ts(decompose_colones_full$seasonal), xlab="", ylab="Componente estacional", main= "Activo neto de los fondos del mercado de dinero\n(2001 - 2020)")
-plot(as.ts(decompose_colones_full$trend), xlab="", ylab="Componente tendencia",  main= "Activo neto de los fondos del mercado de dinero\n(2001 - 2020)")
-plot(as.ts(decompose_colones_full$random), xlab="", ylab="Componente aleatorio",  main= "Activo neto de los fondos del mercado de dinero\n(2001 - 2020)")
-plot(decompose_colones_full, xlab="")
+plot(as.ts(decompose_dolares_full2$seasonal), xlab="", ylab="Componente estacional", main= "Activo neto de los fondos del mercado de dinero\n(2001 - 2020)")
+plot(as.ts(decompose_dolares_full2$trend), xlab="", ylab="Componente tendencia",  main= "Activo neto de los fondos del mercado de dinero\n(2001 - 2020)")
+plot(as.ts(decompose_dolares_full2$random), xlab="", ylab="Componente aleatorio",  main= "Activo neto de los fondos del mercado de dinero\n(2001 - 2020)")
+plot(decompose_dolares_full, xlab="")
 
 ```
 Con respecto a la parte estacional y de tendencia se puede concluir lo mismo que en el 
-caso aditivo pero el componente aleatorio esta vez si tiene a verse mas cercano al
-ruido blanco o sin ninguna tendencia clara. La serie, por ende, se va a analizar de forma
-multiplicativa. 
+caso aditivo pero el componente aleatorio posee demasiadas fluctuaciones al inicio de la serie con lo cual parece ser que es mas bien aditiva. La serie, por ende, se va a analizar de forma
+aditiva. 
 
 
 ## 1.5 - Histograma y test de normalidad para los errores
@@ -238,7 +213,7 @@ multiplicativa.
 
 ```{r  warning=FALSE}
 # Accidentes aditivo
-errores <- decompose_colones_full$random 
+errores <- decompose_dolares_full$random 
 
 hist(errores,breaks="Sturges",freq=T, include.lowest = TRUE, col="blue",border="darkred", ylab = "Frecuencia", main = "Histograma de los errores de la\nActivo neto de los fondos del mercado de dinero (Sturges)")
 

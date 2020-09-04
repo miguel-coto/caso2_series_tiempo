@@ -43,13 +43,6 @@ colones <- data_frame(date = base$`Activo neto`,
   mutate(year = as.factor(year(date)),
          month = as.factor(month(date)))
 
-dolares <- tibble(date = base$`Activo neto`,
-                  dol =  base$USD) %>%
-  mutate(date = ymd(paste0(date, "-01"))) %>%
-  mutate(year = as.factor(year(date)),
-         month = as.factor(month(date)))
-
-head(dolares)
 head(colones)
 ```
 
@@ -72,24 +65,6 @@ colones <- colones %>%
 colones_ts_full <- ts(colones_full$col, start = c(2001,2), frequency = 12)
 colones_ts <- ts(colones$col, start = c(2010,1), frequency = 12)
 
-# Dolares
-
-# 6 periodos para utilizar a modo de validación
-dolares_val <- dolares %>% 
-  slice_tail(n = 6)
-
-# Serie completa para el analisis exploratorio
-dolares_full <- dolares
-
-# 10 años de datos para modelar
-dolares <- dolares %>% 
-  filter(date>"2009-12-01")
-
-# Objetos ts tanto para la serie completa como para la serie de modelado
-dolares_ts_full <- ts(dolares_full$dol, start = c(2001,2), frequency = 12)
-dolares_ts <- ts(dolares$dol, start = c(2010,1), frequency = 12)
-
-
 ```
 
 
@@ -100,8 +75,6 @@ dolares_ts <- ts(dolares$dol, start = c(2010,1), frequency = 12)
 
 ```{r  warning=FALSE}
 plot_histogram(colones$col)
-
-
 
 ```
 
@@ -297,6 +270,6 @@ Box.test(errores_m, type = "Ljung-Box")
 
 ```
 
-Para comprobar la auto-correlación de los errores se utilizó la prueba de Box-Ljung y con un nivel de significancia del 95% no se rechaza la hipótesis nula de que no hay correlación en la muestra, es por esto que podemos concluir que no hay correlación en los errores de la serie de homicidios lo cual, junto con la comprobación de la normalidad anterior, permite proseguir con el analisis pues la serie no presenta mayores problemas en cuanto a los supuestos de los modelos lineales.
+Para comprobar la auto-correlación de los errores se utilizó la prueba de Box-Ljung y con un nivel de significancia del 95% no se rechaza la hipótesis nula de que no hay correlación en la muestra, es por esto que podemos concluir que no hay correlación en los errores de la serie de homicidios lo cual, junto con la comprobación de la normalidad anterior, permite proseguir con el análisis pues la serie no presenta mayores problemas en cuanto a los supuestos de los modelos lineales.
 
 
