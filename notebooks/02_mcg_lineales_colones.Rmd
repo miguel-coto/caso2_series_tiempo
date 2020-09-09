@@ -1,0 +1,606 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(here)
+library(readxl)
+#library(papeR)
+#library(outliers)
+library(kableExtra)
+#library(DataExplorer)
+library(lubridate)
+library(forecast)
+library(nlme)
+#library(nortest)
+library(tidyverse)
+library(ggfortify)
+library(dygraphs)
+library(seasonal)
+library(seasonalview)
+```
+
+Rutas
+```{r}
+raw_data <- here("data", "raw")
+interim_data <- here("data", "interim")
+final_data <- here("data", "processed")
+
+```
+
+Leyendo base de datos
+```{r}
+base <- read_excel(paste0(raw_data,"/Base Datos.xlsx"), 
+    col_types = c("text", "numeric", "numeric"))
+
+head(base)
+```
+
+Extrayendo la base de colones y de dolares
+```{r}
+
+colones <- data_frame(date = base$`Activo neto`,
+                  col =  as.double(base$CRC)) %>%
+  mutate(date = ymd(paste0(date, "-01"))) %>%
+  mutate(year = as.factor(year(date)),
+         month = as.factor(month(date)))
+
+head(colones)
+```
+
+Convirtiendo los datos a series de tiempo
+```{r}
+# Colones
+
+# 6 periodos para utilizar a modo de validación
+colones_val <- colones %>% 
+  slice_tail(n = 6)
+
+# Serie completa para el analisis exploratorio
+colones_full <- colones
+
+# 10 años de datos para modelar
+colones <- colones %>% 
+  filter(date>"2009-12-01" & date<="2020-01-01")
+
+# Objetos ts tanto para la serie completa como para la serie de modelado
+colones_ts_full <- ts(colones_full$col, start = c(2001,2), frequency = 12)
+colones_ts <- ts(colones$col, start = c(2010,1), frequency = 12)
+colones_ts_val <- tail(colones_ts_full, 6)
+
+```
+
+
+## 2.3 - Método de Holt - Winters (Multiplicativo)
+
+Debido a que la serie de colones posee tendecia-ciclo, estacionalidad y patrón irregular
+se procede a analizar primero a travez del modelo de suavizamiento exponencial de
+Holt-Winters.
+
+```{r  warning=FALSE}
+
+APaditivo.hw <- HoltWinters (colones_ts, seasonal = "multiplicative")
+APaditivo.hw ; APaditivo.hw$SSE
+
+#descomposici?n de la serie
+plot (APaditivo.hw$fitted, main = "Descomposición de la serie  de muertes por\naccidentes de tránsito por método de Holt-Winters", xlab = "")
+
+#PRON?STICO aditivo 
+AP.predict <- predict(APaditivo.hw, n.ahead = 6,seasonal = "additive")
+
+AP.predict2 <-forecast(APaditivo.hw)
+  
+pred_HW<- ts(c(AP.predict2$fitted, window(ts(AP.predict2$mean), start=1, end=6)),               
+   start = start(AP.predict2$fitted),
+   frequency = frequency(AP.predict2$fitted))
+
+HW_preds<- cbind(Serie = colones_ts, Real = colones_ts_val,Prediccion1=pred_HW)
+
+
+
+# Graficos
+dygraph(HW_preds, main = "Predicción modelo Holt-Winters") %>%
+dySeries("Serie", label = "Cantidad") %>%
+dySeries("Real", label = "Real") %>%
+dySeries("Prediccion1", label = "Predicción") %>%
+dyAxis("x", label = "Meses") %>% 
+dyAxis("y", label = "Accidentes") %>% 
+dyOptions(colors = RColorBrewer::brewer.pal(3, "Set1")) %>% 
+dyRangeSelector()
+
+
+
+acc_hotlWint <- tibble( Metodo = c("Serie completa",
+                   "Pronóstico"),
+        RMSE = round(c(forecast::accuracy(AP.predict2, colones_ts_val)[,2]),3),
+        MAE = round(c(forecast::accuracy(AP.predict2, colones_ts_val)[,3]),3),
+        MAPE = round(c(forecast::accuracy(AP.predict2, colones_ts_val)[,5]),3),
+
+        ) 
+
+acc_hotlWint %>% 
+  mutate_if(is.numeric, function(x) {
+    cell_spec(x, bold = T, 
+              color = spec_color(x, end = 0.9, direction = -1),
+              font_size = spec_font_size(x, begin = 12,end = 14, scale_from = NA))
+  }) %>%
+  kable(escape = F, caption = "Medidas de ajuste (Holt-Winters)", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+
+```
+
+
+En este caso el alpha (factor se suavizamiento) al ser de 0.52 da un peso similar a las estimaciones del nivel de la serie en el pasado y al valor de la serie en el tiempo t ajustado por estacionalidad. Además, dado que el beta (factor de tendencia) es 0 se puede decir que el peso de la estimación del componente de tendencia es mas fuerte en la estimación de la pendiente en el tiempo t-1. Finalmente, el gamma (factor de estacionalidad) es de 1 con lo cual se puede decir que el peso lo tiene el mismo indice en el tiempo t. 
+
+
+# 3 - Modelos
+
+## 3.1 Modelos de regresión para series de tiempo univariadas
+
+### 3.1.1 - Modelo de regresión regular
+
+Al existir evidente tendencia y estacionalidad en la serie, se modela usando variables dummy para modelar los factores estacionales. 
+
+Primer modelo de regresón simple para graficar la linea de tendencia.
+
+```{r  warning=FALSE}
+x<-time(colones_ts)
+Seas <- cycle(colones_ts)
+
+model1=lm(colones_ts~x++ factor(Seas))
+summary(model1)
+
+plot(colones_ts,type='o',main='', xlab = "", ylab = "Muertes por accidentes de tránsito")
+abline(model1, col="red")
+```
+
+
+#### 3.1.1.1 - Analisis de los residuos
+
+##### 3.1.1.1.1 Normalidad
+
+```{r  warning=FALSE}
+
+#Normalidad Ho: La muestra proviene de una distribuci?n normal
+#An?lisis gr?fico
+hist(rstudent(model1),xlab='Residuos Estandarizados')
+qqnorm(rstudent(model1))
+
+#An?lisis formal
+normtest::jb.norm.test(model1$residuals) #Prueba de Jarque Bera
+normtest::frosini.norm.test(model1$residuals) #Prueba de Frosini
+normtest::geary.norm.test(model1$residuals) #Prueba de Geary
+
+```
+
+En el análisis de los residuos, en primer lugar, se intenta probar que estos tengan una distribución normal. Para esto se relizaron los gráficos de histograma y de qqnorm en donde hay indicios de que la distribución es normal pero tiene una cola pesada a la derecha.
+Para completar el análisis se prueba de manera formal la hipótesis de que los residuos se distribuyen normalmente mediante 3 pruebas: Jarque-Bera, Frosini y Geary. Para todas, la hipótesis nula es que la muestra se distribuye normalmente y 2 de ellas se rechazaron con un nivel de significancia del 95%, por lo tanto, se concluye que los residuos de la regresión lineal No se distribuyen normalmente. 
+
+##### 3.1.1.1.2 - Heterocedasticidad
+
+```{r  warning=FALSE}
+
+#Heterocedasticidad Ho: Los residuos son homocedasticos (varianza constante)
+lmtest::bptest(model1)
+
+```
+
+Además, se comprueba la heterocedasticidad de los residuos a travéz del test de Breusch-Pagan en la cual la hipótesis nula es que los residuos son homocedasticos y con un nivel de significancia del 95% no se rechaza, por ende, se puede afirmar que la varianza de los residuos es constante.
+
+
+##### 3.1.1.1.3 Autocorrelación
+
+```{r  warning=FALSE}
+
+#Hip?tesis nula Ho: No hay autocorrelaci?n de los errores
+#Breusch Godfrey
+lmtest::bgtest(model1)
+#Durbin Watson (Si R2 < d, entonces la regresi?n podr?a no ser espuria, un d muy bajo es sospecha y deber?a llamar la atenci?n)
+lmtest::dwtest(model1)
+#Box.test(residuals(consump1), type = "Ljung-Box")
+Box.test(residuals(model1), type = "Ljung-Box")
+
+```
+
+Finalmente, se prueba el supuesto de autocorrelación de los errores mediante 3 pruebas de hipótesis. Se realiza la prueba Breusch-Godfrey para correlaciones seriales de orden 1, la prueba de Durbin-Watson y la prueba de Box-Ljung.
+Para las 3, la hipótesis nula es que no hay autocorrelación en los errores y dado que todas se rechazan con un nivel de signficancia del 95% se concluye que existe autocorrelación en los residuos de la regresión. 
+
+Como esto representa un problema, se procede a realizar una diferenciación a la serie para corregir autocorrelación y poder estimar la regresión lineal nuevamente. Esto se realiza mediante modelos de ARIMA.
+
+
+seas(
+x = colones_ts,
+transform.function = "none",
+regression.aictest = NULL,
+outlier = NULL,
+arima.model = "(0 1 0)(0 1 1)"
+)
+
+```{r}
+m <- seas(colones_ts)
+seasonalview::view(m)
+
+
+```
+
+## 3.2 - Modelos ARIMA
+
+### 3.2.1 - Identificación
+
+
+```{r  warning=FALSE}
+
+#plot.ts(colones_ts)
+#plot(diff(colones_ts))
+plot(log(colones_ts))
+plot(diff(log(colones_ts)))
+layout(1:2)
+acf(colones_ts)
+pacf(colones_ts)
+```
+*Prueba formal*
+```{r  warning=FALSE}
+#Prueba formal de Dick-Fuller para analizar la raiz unitaria, random walk o no estacionariedad, Ho:La serie tiene raiz unitaria
+tseries::adf.test(colones_ts)
+```
+Debido a la tendencia de la serie y la irregularidad en los gráficos de función de autcorrelación y de autocorrelación parcial se puede determinar que la serie no es estacionaria, además, basado en la prueba formal de Dickey-Fuller se observa que no se rechaza de que la serie tiene raiz unitaria o en otras palabras que es no estacionaria.
+Entonces se procede a diferenciar la serie y aplicarle logaritmo natural para tratar de hacerla estacionaria, es decir con media y varianza constante en el tiempo. 
+
+*Diferenciacion y logaritmo*
+
+```{r  warning=FALSE}
+dygraph(diff(log(colones_ts)),main="Muertes por accidentes de tránsito - Primera diferencia y Logaritmo",ylab='Dif(log(y))',xlab="Periodo") %>% dyRangeSelector()
+
+layout(1:2)
+acf(diff(log(colones_ts)), lag.max = 36)
+pacf(diff(log(colones_ts)), lag.max = 36)
+```
+
+*Prueba formal*
+```{r  warning=FALSE}
+#Prueba formal de Dick-Fuller para analizar la raiz unitaria, random walk o no estacionariedad, Ho:La serie tiene raiz unitaria
+tseries::adf.test(diff(log(colones_ts)))
+```
+
+Al ver el gráfico de la serie, que la media es constante y la variancia está al rededor de 0 y apoyado en la prueba de hipótesis del test de Dickey-Fuller se puede concluir que la serie con logaritmo y diferenciada una vez es estacionaria. 
+
+
+#### 3.2.1.2 - Modelo 2 (I1 - sMA1)
+
+```{r  warning=FALSE}
+
+layout(1:2)
+acf(diff(log(colones_ts)), lag.max = 36)
+pacf(diff(log(colones_ts)), lag.max = 36)
+
+```
+
+Al observar las estacas de parte estacional (cada 12 periodos) se observa que en el ACF van cayendo a 0 de forma pausada y en el PACF, en cambio, no es tan claro que las estacas vayan cayendo suavemente. Tomando encuenta lo anterior, se procede con un modelo MA1 en la parte estacional. 
+
+
+```{r  warning=FALSE}
+#MODELO 2
+
+colones_tsn<-log(colones_ts) 
+
+mod1<-arima(colones_tsn, method="ML",order = c(0,1,0), seasonal = c(0,0,1))
+mod1 
+#mod2$coef
+
+#Intervalo de confianza para el coeficiente
+confint(mod1)
+
+```
+
+En este modelo se observa que el coeficiente en valor absoluto es menor que 1 y que el intervalo de confianza a un 95% no contiene al 1 por lo que se puede decir el coeficiente es estadisticamente distinto de 1.
+
+*Normalidad de los residuos*
+
+```{r  warning=FALSE}
+#JARQUE-BERA (Ho: LOS RESIDUOS SE DISTRIBUYEN NORMALMENTE)
+hist(resid(mod1))
+
+tseries::jarque.bera.test(resid(mod1))
+
+```
+
+Con base en el histograma y la prueba de normalidad de Jarque-Bera de los residuos se puede afirmar que estos se distribuyen normalmente. 
+
+
+*Independencia de los residuos*
+```{r  warning=FALSE}
+#Ho: LOS RESIDUOS EN SU CONJUNTO SON INDEPENDIENTES
+Box.test(resid(mod1), lag = 1, type = "Ljung")
+```
+
+Además, la prueba de Box-Ljung arroja que  no se rechaza la hipótesis de que los residuos sean independientes, es decir, estos no estan correlacionados.
+
+
+*Funciones de autocorrelación de los residuos*
+```{r  warning=FALSE}
+
+layout(1:2)
+acf(resid(mod1), lag.max = 36)
+pacf(resid(mod1), lag.max = 36)
+```
+
+
+En los gráficos de funciones de autocorrelación, se aprecia que sigen habiendo bastones que sobrepasan los intervalos especificamente en el periodo 11 en ambos casos. Por esta razon se propone un nuevo modelo que inlcluya una difereciación en la parte estacional pero no de la forma usual cada 12 periodos sino cada 11. 
+
+
+
+#### 3.2.1.3 - Modelo 3 (MA1 - sI1MA1)
+
+
+```{r  warning=FALSE}
+#MODELO 3
+mod3<-arima(colones_tsn, method="ML",order = c(0,1,0), seasonal = list(order = c(0,1,1)))
+mod3 
+#mod2$coef
+
+#Intervalo de confianza para el coeficiente
+confint(mod3)
+
+```
+
+Se aprecia que ambos coeficientes en valor absoluto son menores que 1 y que el intervalo de confianza a un 95% no contiene al 1 por lo que se puede decir ambos coeficientes son estadisticamente distintos de 1.
+
+*Normalidad de los residuos*
+
+```{r  warning=FALSE}
+#JARQUE-BERA (Ho: LOS RESIDUOS SE DISTRIBUYEN NORMALMENTE)
+hist(resid(mod3))
+
+tseries::jarque.bera.test(resid(mod3))
+
+```
+
+Con base en el histograma se aprecia que los errores se distribuyen aproximadamente normales pero la prueba de normalidad de Jarque-Bera afirma lo contrario. 
+
+*Independencia de los residuos*
+```{r  warning=FALSE}
+#Ho: LOS RESIDUOS EN SU CONJUNTO SON INDEPENDIENTES
+Box.test (resid(mod3), lag = 1, type = "Ljung")
+```
+
+Además, la prueba de Box-Ljung arroja que  no se rechaza la hipótesis de que los residuos sean independientes, es decir, estos no estan correlacionados.
+
+
+*Funciones de autocorrelación de los residuos*
+```{r  warning=FALSE}
+
+layout(1:2)
+acf(resid(mod3))
+pacf(resid(mod3))
+```
+
+En los gráficos de funciones de autocorrelación, se aprecia que aún hay  bastones que sobrepasan los intervalos. Por esta razón se procede a probar los modelos con base en los indicadores de ajuste con respecto a la serie y al pronóstico de 6 periodos contra el modelo propuesto por el auto arima x13.
+
+#### 3.2.1.5 - Auto ARIMA - X13-ARIMA-SEATS
+
+```{r  warning=FALSE}
+
+m<-seas(
+x = colones_ts,
+transform.function = "log",
+regression.aictest = NULL,
+outlier = NULL
+)
+
+#grafico ajustado
+plot(m, trend = TRUE)
+monthplot(m)
+acf(as.vector(resid(m)))
+pacf(as.vector(resid(m)))
+plot(density(resid(m)))
+qqnorm(resid(m))
+
+
+```
+
+
+<style>
+div.blue { background-color:#e6f0ff; border-radius: 5px; padding: 20px;}
+</style>
+<div class = "blue">
+
+Automatic ARIMA Model Selection
+Procedure based closely on TRAMO ,method of Gomez and Maravall (2000)
+"Automatic Modeling Methods for Univariate Series",
+A Course in Time Series (Edited by D. Pena, G. C. Tiao, R. S. Tsay),
+New York : J. Wiley and Sons
+
+Maximum order for regular ARMA parameters : 2
+
+Maximum order for seasonal ARMA parameters : 1
+
+Maximum order for regular differencing : 2
+
+Maximum order for seasonal differencing : 1
+
+Results of Unit Root Test for identifying orders of differencing:
+
+Regular difference order : 1 Seasonal difference order : 0
+
+Mean is significant.
+
+Best Five ARIMA Models
+
+Model # 1 : (0 1 0)(1 0 0) (BIC2 = -2.369)
+Model # 2 : (0 1 0)(1 0 1) (BIC2 = -2.346)
+Model # 3 : (0 1 1)(1 0 0) (BIC2 = -2.329)
+Model # 4 : (1 1 0)(1 0 0) (BIC2 = -2.329)
+Model # 5 : (1 1 1)(1 0 0) (BIC2 = -2.319)
+Preliminary model choice : (0 1 0)(1 0 0)
+
+Deleted constant regressor(s) due to insignificant t-value.
+
+ 
+
+Final Checks for Identified Model
+
+ 
+
+Checking for Unit Roots.
+
+No unit root found.
+
+ 
+
+Checking for insignificant ARMA coefficients.
+
+Final automatic model choice : (0 1 0)(1 0 0)
+
+End of automatic model selection procedure.
+
+Average absolute percentage error in within-sample forecasts:
+
+Last year: 5.63
+Last-1 year: 6.88
+Last-2 year: 4.17
+Last three years: 5.56
+
+Estimation converged in 2 ARMA iterations, 5 function evaluations.
+
+</div>
+
+De la salida del X13-ARIMA-SEATS se extrae que algunos de los modelos analizados fueron probados tambien en el proceso automatico y que el modelo seleccionado no coincide con el modelo que recomiendo el autoarima. 
+Entonces, se procede a probar los modelos propuestos contra el modelo autorima. 
+
+```{r}
+mod4<-arima(colones_tsn, method="ML",order = c(0,1,0), seasonal = list(order = c(1,0,0)))
+mod4 
+
+#Intervalo de confianza para el coeficiente
+confint(mod4)
+```
+
+
+Se aprecia que ambos coeficientes en valor absoluto son menores que 1 y que el intervalo de confianza a un 95% no contiene al 1 por lo que se puede decir ambos coeficientes son estadisticamente distintos de 1.
+
+*Normalidad de los residuos*
+
+```{r  warning=FALSE}
+#JARQUE-BERA (Ho: LOS RESIDUOS SE DISTRIBUYEN NORMALMENTE)
+hist(resid(mod4))
+
+tseries::jarque.bera.test(resid(mod4))
+
+```
+
+Con base en el histograma se aprecia que los errores se distribuyen aproximadamente normales y la prueba de normalidad de Jarque-Bera confirma esa apreciación. 
+
+*Independencia de los residuos*
+```{r  warning=FALSE}
+#Ho: LOS RESIDUOS EN SU CONJUNTO SON INDEPENDIENTES
+Box.test (resid(mod4), lag = 1, type = "Ljung")
+```
+
+Además, la prueba de Box-Ljung arroja que  no se rechaza la hipótesis de que los residuos sean independientes, es decir, estos no estan correlacionados.
+
+
+*Funciones de autocorrelación de los residuos*
+```{r  warning=FALSE}
+
+layout(1:2)
+acf(resid(mod4))
+pacf(resid(mod4))
+```
+
+# 4 - Selección del mejor modelo
+
+Una vez teniendo los modelos de suavizamiento exponencial, de regresión y Box-Jenkings (ARIMA) se procede a compararlos en términos de ajuste visual y de indicadores de ajuste para determinar cual es el mejor modelo que pronostique el número de muertes por accidentes de tránsito en Costa Rica. 
+
+
+```{r  warning=FALSE}
+f_mod1 <- forecast(colones_ts, h = 6, model = mod3)
+arima1_ts_f = ts(
+  f_mod1$mean,
+  frequency = 12,
+  start = c(2020, 2),
+  end = c(2020, 7)
+)
+
+f_mod2 <- forecast(colones_ts, h = 6, model = mod4)
+arima2_ts_f = ts(
+  f_mod2$mean,
+  frequency = 12,
+  start = c(2020, 2),
+  end = c(2020, 7)
+)
+
+
+todos_preds <- cbind(
+  Serie = colones_ts,
+  Real = colones_ts_val,
+  #Prediccion1=fit_ses1$mean,
+  #Prediccion2=ts(window(ts(fit_holt$mean), start=1, end=6),frequency = 12, start = c(2018,7)),
+  Prediccion1 = ts(
+    window(ts(AP.predict2$mean), start = 1, end = 6),
+    frequency = 12,
+    start = c(2020, 2)
+  ),
+  #Prediccion4=mod1.1_ts_f,
+  Prediccion2 = arima1_ts_f,
+  Prediccion3 = arima2_ts_f
+)
+
+# Graficamos
+dygraph(todos_preds, main = "Predicción todos los modelos") %>%
+dySeries("Serie", label = "Cantidad") %>%
+dySeries("Real", label = "Real") %>%
+#dySeries("Prediccion1", label = "SES") %>%
+#dySeries("Prediccion2", label = "Holt") %>%
+dySeries("Prediccion1", label = "Holt-Winters") %>%
+#dySeries("Prediccion4", label = "Regresion") %>%
+dySeries("Prediccion2", label = "ARIMA") %>%
+dySeries("Prediccion3", label = "ARIMA_X13") %>%
+dyAxis("x", label = "Meses") %>% 
+dyAxis("y", label = "Accidentes") %>% 
+dyOptions(colors = RColorBrewer::brewer.pal(7, "Set1")) %>% 
+dyRangeSelector()
+
+
+acc_todos <- tibble( Metodo = c("Holt-Winters","ARIMA","ARIMA_X13"),
+        #ME = c(accuracy(AP.predict2, colones_ts_val)[,1]),
+        RMSE = round(c(
+          #forecast::accuracy(fit_ses1, colones_ts_val)[2,2],
+                       #forecast::accuracy(fit_holt, colones_ts_val)[2,2],
+                       forecast::accuracy(AP.predict2, colones_ts_val)[2,2],
+                       #rmse(colones_ts_val, mod1.1_ts_f),
+                       forecast::accuracy(f_mod1, colones_ts_val)[2,2],
+                       forecast::accuracy(f_mod2, colones_ts_val)[2,2]),3),
+        MAE = round(c(
+          #forecast::accuracy(fit_ses, colones_ts_val)[2,3],
+                       #forecast::accuracy(fit_holt, colones_ts_val)[2,3],
+                       forecast::accuracy(AP.predict2, colones_ts_val)[2,3],
+                       #mae(colones_ts_val, mod1.1_ts_f),
+                       forecast::accuracy(f_mod1, colones_ts_val)[2,3],
+                       forecast::accuracy(f_mod2, colones_ts_val)[2,3]),3),
+        #MPE = c(accuracy(AP.predict2, colones_ts_val)[,4]),
+        MAPE = round(c(
+          #forecast::accuracy(fit_ses, colones_ts_val)[2,5],
+                       #forecast::accuracy(fit_holt, colones_ts_val)[2,5],
+                       forecast::accuracy(AP.predict2, colones_ts_val)[2,5],
+                       #mape(colones_ts_val, mod1.1_ts_f)*100,
+                       forecast::accuracy(f_mod1, colones_ts_val)[2,5],
+                       forecast::accuracy(f_mod2, colones_ts_val)[2,5]),3)        #MASE = c(accuracy(AP.predict2, colones_ts_val)[,6])
+        
+        ) 
+
+acc_todos %>% 
+  mutate_if(is.numeric, function(x) {
+    cell_spec(x, bold = T, 
+              color = spec_color(x, end = 0.9, direction = -1),
+              font_size = spec_font_size(x, begin = 12,end = 14, scale_from = NA))
+  }) %>%
+  kable(escape = F, caption = "Medidas de ajuste (Todos los modelos)", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+```
+
+Finalmente, se obtienen los valores de prónostico de 3 modelos a contrastar: Holt-Winters, ARIMA y X13. Se puede apreciar facilmente que el Holt-Winters fue el mas alejado de los valores reales. Entre los modelos ARIMA se puede observar que tienen, en términos gráficos, resultados similares. Moviendonos al analisis de los indicadores de ajuste se puede ver que estos 2 últimos modelos de igual forma son los que obtienen los mejores indicadores pero en términos generales el modelo de ARIMA propuesto por el X13 posee mejor ajuste y es entonces que se selecciona como el mejor modelo lineal para predecir el número de autos importados por mes en Costa Rica. 
+
+
