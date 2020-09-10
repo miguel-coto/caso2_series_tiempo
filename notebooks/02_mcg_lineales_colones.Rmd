@@ -62,11 +62,11 @@ colones_full <- colones
 
 # 10 años de datos para modelar
 colones <- colones %>% 
-  filter(date>"2009-12-01" & date<="2020-01-01")
+  filter(date>"2007-12-01" & date<="2020-01-01")
 
 # Objetos ts tanto para la serie completa como para la serie de modelado
 colones_ts_full <- ts(colones_full$col, start = c(2001,2), frequency = 12)
-colones_ts <- ts(colones$col, start = c(2010,1), frequency = 12)
+colones_ts <- ts(colones$col, start = c(2008,1), frequency = 12)
 colones_ts_val <- tail(colones_ts_full, 6)
 
 ```
@@ -87,7 +87,7 @@ APaditivo.hw ; APaditivo.hw$SSE
 plot (APaditivo.hw$fitted, main = "Descomposición de la serie  de muertes por\naccidentes de tránsito por método de Holt-Winters", xlab = "")
 
 #PRON?STICO aditivo 
-AP.predict <- predict(APaditivo.hw, n.ahead = 6,seasonal = "additive")
+AP.predict <- predict(APaditivo.hw, n.ahead = 6,seasonal = "multiplicative")
 
 AP.predict2 <-forecast(APaditivo.hw)
   
@@ -210,21 +210,6 @@ Para las 3, la hipótesis nula es que no hay autocorrelación en los errores y d
 Como esto representa un problema, se procede a realizar una diferenciación a la serie para corregir autocorrelación y poder estimar la regresión lineal nuevamente. Esto se realiza mediante modelos de ARIMA.
 
 
-seas(
-x = colones_ts,
-transform.function = "none",
-regression.aictest = NULL,
-outlier = NULL,
-arima.model = "(0 1 0)(0 1 1)"
-)
-
-```{r}
-m <- seas(colones_ts)
-seasonalview::view(m)
-
-
-```
-
 ## 3.2 - Modelos ARIMA
 
 ### 3.2.1 - Identificación
@@ -327,7 +312,7 @@ pacf(resid(mod1), lag.max = 36)
 ```
 
 
-En los gráficos de funciones de autocorrelación, se aprecia que sigen habiendo bastones que sobrepasan los intervalos especificamente en el periodo 11 en ambos casos. Por esta razon se propone un nuevo modelo que inlcluya una difereciación en la parte estacional pero no de la forma usual cada 12 periodos sino cada 11. 
+En los gráficos de funciones de autocorrelación, se aprecia que siguen habiendo bastones que sobrepasan los intervalos especificamente en el periodo 11 en ambos casos. Por esta razon se propone un nuevo modelo que inlcluya una difereciación en la parte estacional pero no de la forma usual cada 12 periodos sino cada 11. 
 
 
 
@@ -357,7 +342,7 @@ tseries::jarque.bera.test(resid(mod3))
 
 ```
 
-Con base en el histograma se aprecia que los errores se distribuyen aproximadamente normales pero la prueba de normalidad de Jarque-Bera afirma lo contrario. 
+Con base en el histograma se aprecia que los errores se distribuyen aproximadamente normales y la prueba de normalidad de Jarque-Bera afirma esto. 
 
 *Independencia de los residuos*
 ```{r  warning=FALSE}
@@ -422,20 +407,20 @@ Maximum order for seasonal differencing : 1
 
 Results of Unit Root Test for identifying orders of differencing:
 
-Regular difference order : 1 Seasonal difference order : 0
+Regular difference order : 1 Seasonal difference order : 1
 
-Mean is significant.
+Mean is not significant.
 
 Best Five ARIMA Models
 
-Model # 1 : (0 1 0)(1 0 0) (BIC2 = -2.369)
-Model # 2 : (0 1 0)(1 0 1) (BIC2 = -2.346)
-Model # 3 : (0 1 1)(1 0 0) (BIC2 = -2.329)
-Model # 4 : (1 1 0)(1 0 0) (BIC2 = -2.329)
-Model # 5 : (1 1 1)(1 0 0) (BIC2 = -2.319)
-Preliminary model choice : (0 1 0)(1 0 0)
+Model # 1 : (0 1 0)(0 1 1) (BIC2 = -2.199)
+Model # 2 : (1 1 1)(0 1 1) (BIC2 = -2.176)
+Model # 3 : (0 1 1)(0 1 1) (BIC2 = -2.173)
+Model # 4 : (1 1 0)(0 1 1) (BIC2 = -2.169)
+Model # 5 : (0 1 2)(0 1 1) (BIC2 = -2.165)
+Preliminary model choice : (0 1 0)(0 1 1)
 
-Deleted constant regressor(s) due to insignificant t-value.
+Model changed to ( 0, 1, 1) ( 0, 1, 1)
 
  
 
@@ -449,20 +434,26 @@ No unit root found.
 
  
 
+Checking for nonseasonal overdifferencing.
+
+Nonseasonal MA not within 0.001 of 1.0 - model passes test.
+
+ 
+
 Checking for insignificant ARMA coefficients.
 
-Final automatic model choice : (0 1 0)(1 0 0)
+Final automatic model choice : (0 1 1)(0 1 1)
 
 End of automatic model selection procedure.
 
 Average absolute percentage error in within-sample forecasts:
 
-Last year: 5.63
-Last-1 year: 6.88
-Last-2 year: 4.17
-Last three years: 5.56
+Last year: 7.39
+Last-1 year: 5.83
+Last-2 year: 4.76
+Last three years: 6.00
 
-Estimation converged in 2 ARMA iterations, 5 function evaluations.
+Estimation converged in 1 ARMA iterations, 4 function evaluations.
 
 </div>
 
@@ -470,7 +461,7 @@ De la salida del X13-ARIMA-SEATS se extrae que algunos de los modelos analizados
 Entonces, se procede a probar los modelos propuestos contra el modelo autorima. 
 
 ```{r}
-mod4<-arima(colones_tsn, method="ML",order = c(0,1,0), seasonal = list(order = c(1,0,0)))
+mod4<-arima(colones_tsn, method="ML",order = c(0,1,1), seasonal = list(order = c(0,1,1)))
 mod4 
 
 #Intervalo de confianza para el coeficiente
@@ -478,7 +469,7 @@ confint(mod4)
 ```
 
 
-Se aprecia que ambos coeficientes en valor absoluto son menores que 1 y que el intervalo de confianza a un 95% no contiene al 1 por lo que se puede decir ambos coeficientes son estadisticamente distintos de 1.
+Se aprecia que ambos coeficientes en valor absoluto son menores que 1 y pero el intervalo de confianza a un 95%  contiene al 1 para el coeficiente ma1 por lo que se puede decir ese coeficiente no es estadisticamente distinto de 1.
 
 *Normalidad de los residuos*
 
@@ -601,6 +592,6 @@ acc_todos %>%
 
 ```
 
-Finalmente, se obtienen los valores de prónostico de 3 modelos a contrastar: Holt-Winters, ARIMA y X13. Se puede apreciar facilmente que el Holt-Winters fue el mas alejado de los valores reales. Entre los modelos ARIMA se puede observar que tienen, en términos gráficos, resultados similares. Moviendonos al analisis de los indicadores de ajuste se puede ver que estos 2 últimos modelos de igual forma son los que obtienen los mejores indicadores pero en términos generales el modelo de ARIMA propuesto por el X13 posee mejor ajuste y es entonces que se selecciona como el mejor modelo lineal para predecir el número de autos importados por mes en Costa Rica. 
+Finalmente, se obtienen los valores de prónostico de 3 modelos a contrastar: Holt-Winters, ARIMA y X13. Se puede apreciar facilmente que el Holt-Winters fue el mas alejado de los valores reales. Entre los modelos ARIMA se puede observar que tienen, en términos gráficos, resultados similares. Moviendonos al analisis de los indicadores de ajuste se puede ver que estos 2 últimos modelos de igual forma son los que obtienen los mejores indicadores pero en términos generales el modelo de ARIMA estimado de forma manual posee mejor ajuste y es entonces que se selecciona como el mejor modelo lineal para predecir el número de autos importados por mes en Costa Rica. 
 
 

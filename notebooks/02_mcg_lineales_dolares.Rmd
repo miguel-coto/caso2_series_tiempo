@@ -37,7 +37,7 @@ base <- read_excel(paste0(raw_data,"/Base Datos.xlsx"),
 head(base)
 ```
 
-Extrayendo la base de colones y de dolares
+Extrayendo la base de dolares y de dolares
 ```{r}
 
 dolares <- data_frame(date = base$`Activo neto`,
@@ -51,36 +51,36 @@ head(dolares)
 
 Convirtiendo los datos a series de tiempo
 ```{r}
-# Colones
+# dolares
 
 # 6 periodos para utilizar a modo de validación
-colones_val <- colones %>% 
+dolares_val <- dolares %>% 
   slice_tail(n = 6)
 
 # Serie completa para el analisis exploratorio
-colones_full <- colones
+dolares_full <- dolares
 
 # 10 años de datos para modelar
-colones <- colones %>% 
+dolares <- dolares %>% 
   filter(date>"2009-12-01" & date<="2020-01-01")
 
 # Objetos ts tanto para la serie completa como para la serie de modelado
-colones_ts_full <- ts(colones_full$col, start = c(2001,2), frequency = 12)
-colones_ts <- ts(colones$col, start = c(2010,1), frequency = 12)
-colones_ts_val <- tail(colones_ts_full, 6)
+dolares_ts_full <- ts(dolares_full$col, start = c(2001,2), frequency = 12)
+dolares_ts <- ts(dolares$col, start = c(2010,1), frequency = 12)
+dolares_ts_val <- tail(dolares_ts_full, 6)
 
 ```
 
 
-## 2.3 - Método de Holt - Winters (Multiplicativo)
+## 2.3 - Método de Holt - Winters (Aditiva)
 
-Debido a que la serie de colones posee tendecia-ciclo, estacionalidad y patrón irregular
+Debido a que la serie de dolares posee tendecia-ciclo, estacionalidad y patrón irregular
 se procede a analizar primero a travez del modelo de suavizamiento exponencial de
 Holt-Winters.
 
 ```{r  warning=FALSE}
 
-APaditivo.hw <- HoltWinters (colones_ts, seasonal = "multiplicative")
+APaditivo.hw <- HoltWinters (dolares_ts, seasonal = "additive")
 APaditivo.hw ; APaditivo.hw$SSE
 
 #descomposici?n de la serie
@@ -95,7 +95,7 @@ pred_HW<- ts(c(AP.predict2$fitted, window(ts(AP.predict2$mean), start=1, end=6))
    start = start(AP.predict2$fitted),
    frequency = frequency(AP.predict2$fitted))
 
-HW_preds<- cbind(Serie = colones_ts, Real = colones_ts_val,Prediccion1=pred_HW)
+HW_preds<- cbind(Serie = dolares_ts, Real = dolares_ts_val,Prediccion1=pred_HW)
 
 
 
@@ -113,9 +113,9 @@ dyRangeSelector()
 
 acc_hotlWint <- tibble( Metodo = c("Serie completa",
                    "Pronóstico"),
-        RMSE = round(c(forecast::accuracy(AP.predict2, colones_ts_val)[,2]),3),
-        MAE = round(c(forecast::accuracy(AP.predict2, colones_ts_val)[,3]),3),
-        MAPE = round(c(forecast::accuracy(AP.predict2, colones_ts_val)[,5]),3),
+        RMSE = round(c(forecast::accuracy(AP.predict2, dolares_ts_val)[,2]),3),
+        MAE = round(c(forecast::accuracy(AP.predict2, dolares_ts_val)[,3]),3),
+        MAPE = round(c(forecast::accuracy(AP.predict2, dolares_ts_val)[,5]),3),
 
         ) 
 
@@ -132,7 +132,7 @@ acc_hotlWint %>%
 ```
 
 
-En este caso el alpha (factor se suavizamiento) al ser de 0.52 da un peso similar a las estimaciones del nivel de la serie en el pasado y al valor de la serie en el tiempo t ajustado por estacionalidad. Además, dado que el beta (factor de tendencia) es 0 se puede decir que el peso de la estimación del componente de tendencia es mas fuerte en la estimación de la pendiente en el tiempo t-1. Finalmente, el gamma (factor de estacionalidad) es de 1 con lo cual se puede decir que el peso lo tiene el mismo indice en el tiempo t. 
+En este caso el alpha (factor se suavizamiento) al ser de 0.74 da un mayor peso  a las estimaciones del nivel de la serie en el pasado que al valor de la serie en el tiempo t ajustado por estacionalidad. Además, dado que el beta (factor de tendencia) es 0.1 se puede decir que el peso de la estimación del componente de tendencia es mas fuerte en la estimación de la pendiente en el tiempo t-1. Finalmente, el gamma (factor de estacionalidad) es de 0.36 con lo cual se puede decir que el peso lo tiene el mismo indice en el tiempo t-1. 
 
 
 # 3 - Modelos
@@ -146,13 +146,13 @@ Al existir evidente tendencia y estacionalidad en la serie, se modela usando var
 Primer modelo de regresón simple para graficar la linea de tendencia.
 
 ```{r  warning=FALSE}
-x<-time(colones_ts)
-Seas <- cycle(colones_ts)
+x<-time(dolares_ts)
+Seas <- cycle(dolares_ts)
 
-model1=lm(colones_ts~x++ factor(Seas))
+model1=lm(dolares_ts~x++ factor(Seas))
 summary(model1)
 
-plot(colones_ts,type='o',main='', xlab = "", ylab = "Muertes por accidentes de tránsito")
+plot(dolares_ts,type='o',main='', xlab = "", ylab = "Muertes por accidentes de tránsito")
 abline(model1, col="red")
 ```
 
@@ -175,8 +175,8 @@ normtest::geary.norm.test(model1$residuals) #Prueba de Geary
 
 ```
 
-En el análisis de los residuos, en primer lugar, se intenta probar que estos tengan una distribución normal. Para esto se relizaron los gráficos de histograma y de qqnorm en donde hay indicios de que la distribución es normal pero tiene una cola pesada a la derecha.
-Para completar el análisis se prueba de manera formal la hipótesis de que los residuos se distribuyen normalmente mediante 3 pruebas: Jarque-Bera, Frosini y Geary. Para todas, la hipótesis nula es que la muestra se distribuye normalmente y 2 de ellas se rechazaron con un nivel de significancia del 95%, por lo tanto, se concluye que los residuos de la regresión lineal No se distribuyen normalmente. 
+En el análisis de los residuos, en primer lugar, se intenta probar que estos tengan una distribución normal. Para esto se relizaron los gráficos de histograma y de qqnorm en donde hay indicios de que la distribución es normal pero tiene una cola pesada a la izquierda
+Para completar el análisis se prueba de manera formal la hipótesis de que los residuos se distribuyen normalmente mediante 3 pruebas: Jarque-Bera, Frosini y Geary. Para todas, la hipótesis nula es que la muestra se distribuye normalmente y 2 de ellas no se rechazaron con un nivel de significancia del 95%, por lo tanto, se concluye que los residuos de la regresión lineal se distribuyen normalmente. 
 
 ##### 3.1.1.1.2 - Heterocedasticidad
 
@@ -211,7 +211,7 @@ Como esto representa un problema, se procede a realizar una diferenciación a la
 
 
 seas(
-x = colones_ts,
+x = dolares_ts,
 transform.function = "none",
 regression.aictest = NULL,
 outlier = NULL,
@@ -219,7 +219,7 @@ arima.model = "(0 1 0)(0 1 1)"
 )
 
 ```{r}
-m <- seas(colones_ts)
+m <- seas(dolares_ts)
 seasonalview::view(m)
 
 
@@ -232,18 +232,18 @@ seasonalview::view(m)
 
 ```{r  warning=FALSE}
 
-#plot.ts(colones_ts)
-#plot(diff(colones_ts))
-plot(log(colones_ts))
-plot(diff(log(colones_ts)))
+#plot.ts(dolares_ts)
+#plot(diff(dolares_ts))
+plot(log(dolares_ts))
+plot(diff(log(dolares_ts)))
 layout(1:2)
-acf(colones_ts)
-pacf(colones_ts)
+acf(dolares_ts)
+pacf(dolares_ts)
 ```
 *Prueba formal*
 ```{r  warning=FALSE}
 #Prueba formal de Dick-Fuller para analizar la raiz unitaria, random walk o no estacionariedad, Ho:La serie tiene raiz unitaria
-tseries::adf.test(colones_ts)
+tseries::adf.test(dolares_ts)
 ```
 Debido a la tendencia de la serie y la irregularidad en los gráficos de función de autcorrelación y de autocorrelación parcial se puede determinar que la serie no es estacionaria, además, basado en la prueba formal de Dickey-Fuller se observa que no se rechaza de que la serie tiene raiz unitaria o en otras palabras que es no estacionaria.
 Entonces se procede a diferenciar la serie y aplicarle logaritmo natural para tratar de hacerla estacionaria, es decir con media y varianza constante en el tiempo. 
@@ -251,17 +251,17 @@ Entonces se procede a diferenciar la serie y aplicarle logaritmo natural para tr
 *Diferenciacion y logaritmo*
 
 ```{r  warning=FALSE}
-dygraph(diff(log(colones_ts)),main="Muertes por accidentes de tránsito - Primera diferencia y Logaritmo",ylab='Dif(log(y))',xlab="Periodo") %>% dyRangeSelector()
+dygraph(diff(log(dolares_ts)),main="Muertes por accidentes de tránsito - Primera diferencia y Logaritmo",ylab='Dif(log(y))',xlab="Periodo") %>% dyRangeSelector()
 
 layout(1:2)
-acf(diff(log(colones_ts)), lag.max = 36)
-pacf(diff(log(colones_ts)), lag.max = 36)
+acf(diff(log(dolares_ts)), lag.max = 36)
+pacf(diff(log(dolares_ts)), lag.max = 36)
 ```
 
 *Prueba formal*
 ```{r  warning=FALSE}
 #Prueba formal de Dick-Fuller para analizar la raiz unitaria, random walk o no estacionariedad, Ho:La serie tiene raiz unitaria
-tseries::adf.test(diff(log(colones_ts)))
+tseries::adf.test(diff(log(dolares_ts)))
 ```
 
 Al ver el gráfico de la serie, que la media es constante y la variancia está al rededor de 0 y apoyado en la prueba de hipótesis del test de Dickey-Fuller se puede concluir que la serie con logaritmo y diferenciada una vez es estacionaria. 
@@ -272,20 +272,20 @@ Al ver el gráfico de la serie, que la media es constante y la variancia está a
 ```{r  warning=FALSE}
 
 layout(1:2)
-acf(diff(log(colones_ts)), lag.max = 36)
-pacf(diff(log(colones_ts)), lag.max = 36)
+acf(diff(log(dolares_ts)), lag.max = 36)
+pacf(diff(log(dolares_ts)), lag.max = 36)
 
 ```
 
-Al observar las estacas de parte estacional (cada 12 periodos) se observa que en el ACF van cayendo a 0 de forma pausada y en el PACF, en cambio, no es tan claro que las estacas vayan cayendo suavemente. Tomando encuenta lo anterior, se procede con un modelo MA1 en la parte estacional. 
+Al observar las estacas de parte regular se observa que en el ACF tiene una primera estaca alta y en el PACF, en cambio, no es tan claro que las estacas vayan cayendo suavemente. Tomando en cuenta lo anterior, se procede con un modelo AR1 en la parte regular. 
 
 
 ```{r  warning=FALSE}
 #MODELO 2
 
-colones_tsn<-log(colones_ts) 
+dolares_tsn<-log(dolares_ts) 
 
-mod1<-arima(colones_tsn, method="ML",order = c(0,1,0), seasonal = c(0,0,1))
+mod1<-arima(dolares_tsn, method="ML",order = c(1,1,0), seasonal = c(0,0,0))
 mod1 
 #mod2$coef
 
@@ -294,7 +294,7 @@ confint(mod1)
 
 ```
 
-En este modelo se observa que el coeficiente en valor absoluto es menor que 1 y que el intervalo de confianza a un 95% no contiene al 1 por lo que se puede decir el coeficiente es estadisticamente distinto de 1.
+En este modelo se observa que el coeficiente en valor absoluto es menor que 1 y pero el intervalo de confianza a un 95%  contiene al 1 por lo que se puede decir el coeficiente no es estadisticamente distinto de 1.
 
 *Normalidad de los residuos*
 
@@ -306,7 +306,7 @@ tseries::jarque.bera.test(resid(mod1))
 
 ```
 
-Con base en el histograma y la prueba de normalidad de Jarque-Bera de los residuos se puede afirmar que estos se distribuyen normalmente. 
+Con base en el histograma y la prueba de normalidad de Jarque-Bera de los residuos se puede afirmar que estos no se distribuyen normalmente. 
 
 
 *Independencia de los residuos*
@@ -327,16 +327,16 @@ pacf(resid(mod1), lag.max = 36)
 ```
 
 
-En los gráficos de funciones de autocorrelación, se aprecia que sigen habiendo bastones que sobrepasan los intervalos especificamente en el periodo 11 en ambos casos. Por esta razon se propone un nuevo modelo que inlcluya una difereciación en la parte estacional pero no de la forma usual cada 12 periodos sino cada 11. 
+En los gráficos de funciones de autocorrelación, se aprecia que sigen habiendo bastones que sobrepasan los intervalos. Por esta razon se propone un nuevo modelo que inlcluya una difereciación en la parte estacional pero no de la forma usual cada 12 periodos sino cada 11tambien el elemento ma1 para modelar los errores. 
 
 
 
-#### 3.2.1.3 - Modelo 3 (MA1 - sI1MA1)
+#### 3.2.1.3 - Modelo 3 (AR1I1MA1 )
 
 
 ```{r  warning=FALSE}
 #MODELO 3
-mod3<-arima(colones_tsn, method="ML",order = c(0,1,0), seasonal = list(order = c(0,1,1)))
+mod3<-arima(dolares_tsn, method="ML",order = c(1,1,1), seasonal = list(order = c(0,0,0)))
 mod3 
 #mod2$coef
 
@@ -383,7 +383,7 @@ En los gráficos de funciones de autocorrelación, se aprecia que aún hay  bast
 ```{r  warning=FALSE}
 
 m<-seas(
-x = colones_ts,
+x = dolares_ts,
 transform.function = "log",
 regression.aictest = NULL,
 outlier = NULL
@@ -470,7 +470,7 @@ De la salida del X13-ARIMA-SEATS se extrae que algunos de los modelos analizados
 Entonces, se procede a probar los modelos propuestos contra el modelo autorima. 
 
 ```{r}
-mod4<-arima(colones_tsn, method="ML",order = c(0,1,0), seasonal = list(order = c(1,0,0)))
+mod4<-arima(dolares_tsn, method="ML",order = c(0,1,0), seasonal = list(order = c(1,0,0)))
 mod4 
 
 #Intervalo de confianza para el coeficiente
@@ -515,7 +515,7 @@ Una vez teniendo los modelos de suavizamiento exponencial, de regresión y Box-J
 
 
 ```{r  warning=FALSE}
-f_mod1 <- forecast(colones_ts, h = 6, model = mod3)
+f_mod1 <- forecast(dolares_ts, h = 6, model = mod3)
 arima1_ts_f = ts(
   f_mod1$mean,
   frequency = 12,
@@ -523,7 +523,7 @@ arima1_ts_f = ts(
   end = c(2020, 7)
 )
 
-f_mod2 <- forecast(colones_ts, h = 6, model = mod4)
+f_mod2 <- forecast(dolares_ts, h = 6, model = mod4)
 arima2_ts_f = ts(
   f_mod2$mean,
   frequency = 12,
@@ -533,8 +533,8 @@ arima2_ts_f = ts(
 
 
 todos_preds <- cbind(
-  Serie = colones_ts,
-  Real = colones_ts_val,
+  Serie = dolares_ts,
+  Real = dolares_ts_val,
   #Prediccion1=fit_ses1$mean,
   #Prediccion2=ts(window(ts(fit_holt$mean), start=1, end=6),frequency = 12, start = c(2018,7)),
   Prediccion1 = ts(
@@ -564,29 +564,29 @@ dyRangeSelector()
 
 
 acc_todos <- tibble( Metodo = c("Holt-Winters","ARIMA","ARIMA_X13"),
-        #ME = c(accuracy(AP.predict2, colones_ts_val)[,1]),
+        #ME = c(accuracy(AP.predict2, dolares_ts_val)[,1]),
         RMSE = round(c(
-          #forecast::accuracy(fit_ses1, colones_ts_val)[2,2],
-                       #forecast::accuracy(fit_holt, colones_ts_val)[2,2],
-                       forecast::accuracy(AP.predict2, colones_ts_val)[2,2],
-                       #rmse(colones_ts_val, mod1.1_ts_f),
-                       forecast::accuracy(f_mod1, colones_ts_val)[2,2],
-                       forecast::accuracy(f_mod2, colones_ts_val)[2,2]),3),
+          #forecast::accuracy(fit_ses1, dolares_ts_val)[2,2],
+                       #forecast::accuracy(fit_holt, dolares_ts_val)[2,2],
+                       forecast::accuracy(AP.predict2, dolares_ts_val)[2,2],
+                       #rmse(dolares_ts_val, mod1.1_ts_f),
+                       forecast::accuracy(f_mod1, dolares_ts_val)[2,2],
+                       forecast::accuracy(f_mod2, dolares_ts_val)[2,2]),3),
         MAE = round(c(
-          #forecast::accuracy(fit_ses, colones_ts_val)[2,3],
-                       #forecast::accuracy(fit_holt, colones_ts_val)[2,3],
-                       forecast::accuracy(AP.predict2, colones_ts_val)[2,3],
-                       #mae(colones_ts_val, mod1.1_ts_f),
-                       forecast::accuracy(f_mod1, colones_ts_val)[2,3],
-                       forecast::accuracy(f_mod2, colones_ts_val)[2,3]),3),
-        #MPE = c(accuracy(AP.predict2, colones_ts_val)[,4]),
+          #forecast::accuracy(fit_ses, dolares_ts_val)[2,3],
+                       #forecast::accuracy(fit_holt, dolares_ts_val)[2,3],
+                       forecast::accuracy(AP.predict2, dolares_ts_val)[2,3],
+                       #mae(dolares_ts_val, mod1.1_ts_f),
+                       forecast::accuracy(f_mod1, dolares_ts_val)[2,3],
+                       forecast::accuracy(f_mod2, dolares_ts_val)[2,3]),3),
+        #MPE = c(accuracy(AP.predict2, dolares_ts_val)[,4]),
         MAPE = round(c(
-          #forecast::accuracy(fit_ses, colones_ts_val)[2,5],
-                       #forecast::accuracy(fit_holt, colones_ts_val)[2,5],
-                       forecast::accuracy(AP.predict2, colones_ts_val)[2,5],
-                       #mape(colones_ts_val, mod1.1_ts_f)*100,
-                       forecast::accuracy(f_mod1, colones_ts_val)[2,5],
-                       forecast::accuracy(f_mod2, colones_ts_val)[2,5]),3)        #MASE = c(accuracy(AP.predict2, colones_ts_val)[,6])
+          #forecast::accuracy(fit_ses, dolares_ts_val)[2,5],
+                       #forecast::accuracy(fit_holt, dolares_ts_val)[2,5],
+                       forecast::accuracy(AP.predict2, dolares_ts_val)[2,5],
+                       #mape(dolares_ts_val, mod1.1_ts_f)*100,
+                       forecast::accuracy(f_mod1, dolares_ts_val)[2,5],
+                       forecast::accuracy(f_mod2, dolares_ts_val)[2,5]),3)        #MASE = c(accuracy(AP.predict2, dolares_ts_val)[,6])
         
         ) 
 
