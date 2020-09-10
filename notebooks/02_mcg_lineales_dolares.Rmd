@@ -62,11 +62,11 @@ dolares_full <- dolares
 
 # 10 años de datos para modelar
 dolares <- dolares %>% 
-  filter(date>"2009-12-01" & date<="2020-01-01")
+  filter(date>"2007-12-01" & date<="2020-01-01")
 
 # Objetos ts tanto para la serie completa como para la serie de modelado
 dolares_ts_full <- ts(dolares_full$col, start = c(2001,2), frequency = 12)
-dolares_ts <- ts(dolares$col, start = c(2010,1), frequency = 12)
+dolares_ts <- ts(dolares$col, start = c(2008,1), frequency = 12)
 dolares_ts_val <- tail(dolares_ts_full, 6)
 
 ```
@@ -132,7 +132,7 @@ acc_hotlWint %>%
 ```
 
 
-En este caso el alpha (factor se suavizamiento) al ser de 0.74 da un mayor peso  a las estimaciones del nivel de la serie en el pasado que al valor de la serie en el tiempo t ajustado por estacionalidad. Además, dado que el beta (factor de tendencia) es 0.1 se puede decir que el peso de la estimación del componente de tendencia es mas fuerte en la estimación de la pendiente en el tiempo t-1. Finalmente, el gamma (factor de estacionalidad) es de 0.36 con lo cual se puede decir que el peso lo tiene el mismo indice en el tiempo t-1. 
+En este caso el alpha (factor se suavizamiento) al ser de 0.87 da un mayor peso  a las estimaciones del nivel de la serie en el pasado que al valor de la serie en el tiempo t ajustado por estacionalidad. Además, dado que el beta (factor de tendencia) es 0.01 se puede decir que el peso de la estimación del componente de tendencia es mas fuerte en la estimación de la pendiente en el tiempo t-1. Finalmente, el gamma (factor de estacionalidad) es de 0.35 con lo cual se puede decir que el peso lo tiene el mismo indice en el tiempo t-1. 
 
 
 # 3 - Modelos
@@ -176,7 +176,7 @@ normtest::geary.norm.test(model1$residuals) #Prueba de Geary
 ```
 
 En el análisis de los residuos, en primer lugar, se intenta probar que estos tengan una distribución normal. Para esto se relizaron los gráficos de histograma y de qqnorm en donde hay indicios de que la distribución es normal pero tiene una cola pesada a la izquierda
-Para completar el análisis se prueba de manera formal la hipótesis de que los residuos se distribuyen normalmente mediante 3 pruebas: Jarque-Bera, Frosini y Geary. Para todas, la hipótesis nula es que la muestra se distribuye normalmente y 2 de ellas no se rechazaron con un nivel de significancia del 95%, por lo tanto, se concluye que los residuos de la regresión lineal se distribuyen normalmente. 
+Para completar el análisis se prueba de manera formal la hipótesis de que los residuos se distribuyen normalmente mediante 3 pruebas: Jarque-Bera, Frosini y Geary. Para todas, la hipótesis nula es que la muestra se distribuye normalmente y todas ellas no se rechazaron con un nivel de significancia del 95%, por lo tanto, se concluye que los residuos de la regresión lineal se distribuyen normalmente. 
 
 ##### 3.1.1.1.2 - Heterocedasticidad
 
@@ -209,21 +209,6 @@ Para las 3, la hipótesis nula es que no hay autocorrelación en los errores y d
 
 Como esto representa un problema, se procede a realizar una diferenciación a la serie para corregir autocorrelación y poder estimar la regresión lineal nuevamente. Esto se realiza mediante modelos de ARIMA.
 
-
-seas(
-x = dolares_ts,
-transform.function = "none",
-regression.aictest = NULL,
-outlier = NULL,
-arima.model = "(0 1 0)(0 1 1)"
-)
-
-```{r}
-m <- seas(dolares_ts)
-seasonalview::view(m)
-
-
-```
 
 ## 3.2 - Modelos ARIMA
 
@@ -294,7 +279,7 @@ confint(mod1)
 
 ```
 
-En este modelo se observa que el coeficiente en valor absoluto es menor que 1 y pero el intervalo de confianza a un 95%  contiene al 1 por lo que se puede decir el coeficiente no es estadisticamente distinto de 1.
+En este modelo se observa que el coeficiente en valor absoluto es menor que 1  pero el intervalo de confianza a un 95%  contiene al 1 por lo que se puede decir el coeficiente no es estadisticamente distinto de 1.
 
 *Normalidad de los residuos*
 
@@ -306,7 +291,7 @@ tseries::jarque.bera.test(resid(mod1))
 
 ```
 
-Con base en el histograma y la prueba de normalidad de Jarque-Bera de los residuos se puede afirmar que estos no se distribuyen normalmente. 
+Con base en el histograma y la prueba de normalidad de Jarque-Bera de los residuos se puede afirmar que estos se distribuyen normalmente. 
 
 
 *Independencia de los residuos*
@@ -327,7 +312,7 @@ pacf(resid(mod1), lag.max = 36)
 ```
 
 
-En los gráficos de funciones de autocorrelación, se aprecia que sigen habiendo bastones que sobrepasan los intervalos. Por esta razon se propone un nuevo modelo que inlcluya una difereciación en la parte estacional pero no de la forma usual cada 12 periodos sino cada 11tambien el elemento ma1 para modelar los errores. 
+En los gráficos de funciones de autocorrelación, se aprecia que sigen habiendo bastones que sobrepasan los intervalos. Por esta razon se propone un nuevo modelo que inlcluya tambien el elemento ma1 para modelar los errores. 
 
 
 
@@ -428,14 +413,14 @@ Mean is significant.
 
 Best Five ARIMA Models
 
-Model # 1 : (0 1 0)(1 0 0) (BIC2 = -2.369)
-Model # 2 : (0 1 0)(1 0 1) (BIC2 = -2.346)
-Model # 3 : (0 1 1)(1 0 0) (BIC2 = -2.329)
-Model # 4 : (1 1 0)(1 0 0) (BIC2 = -2.329)
-Model # 5 : (1 1 1)(1 0 0) (BIC2 = -2.319)
-Preliminary model choice : (0 1 0)(1 0 0)
+Model # 1 : (0 1 0)(0 0 1) (BIC2 = -2.226)
+Model # 2 : (0 1 0)(1 0 0) (BIC2 = -2.224)
+Model # 3 : (0 1 0) (BIC2 = -2.216)
+Model # 4 : (0 1 0)(1 0 1) (BIC2 = -2.194)
+Model # 5 : (0 1 1)(0 0 1) (BIC2 = -2.192)
+Preliminary model choice : (0 1 0)(0 0 1)
 
-Deleted constant regressor(s) due to insignificant t-value.
+Model changed to ( 0, 1, 1) ( 0, 1, 1) without constant term
 
  
 
@@ -449,20 +434,26 @@ No unit root found.
 
  
 
+Checking for nonseasonal overdifferencing.
+
+Nonseasonal MA not within 0.001 of 1.0 - model passes test.
+
+ 
+
 Checking for insignificant ARMA coefficients.
 
-Final automatic model choice : (0 1 0)(1 0 0)
+Final automatic model choice : (0 1 1)(0 1 1)
 
 End of automatic model selection procedure.
 
 Average absolute percentage error in within-sample forecasts:
 
-Last year: 5.63
-Last-1 year: 6.88
-Last-2 year: 4.17
-Last three years: 5.56
+Last year: 7.32
+Last-1 year: 14.27
+Last-2 year: 6.76
+Last three years: 9.45
 
-Estimation converged in 2 ARMA iterations, 5 function evaluations.
+Estimation converged in 29 ARMA iterations, 88 function evaluations.
 
 </div>
 
@@ -470,7 +461,7 @@ De la salida del X13-ARIMA-SEATS se extrae que algunos de los modelos analizados
 Entonces, se procede a probar los modelos propuestos contra el modelo autorima. 
 
 ```{r}
-mod4<-arima(dolares_tsn, method="ML",order = c(0,1,0), seasonal = list(order = c(1,0,0)))
+mod4<-arima(dolares_tsn, method="ML",order = c(0,1,1), seasonal = list(order = c(0,1,1)))
 mod4 
 
 #Intervalo de confianza para el coeficiente
@@ -508,6 +499,9 @@ layout(1:2)
 acf(resid(mod4))
 pacf(resid(mod4))
 ```
+
+Se observa que las estacas en los errores del modelo son mejores que las del modelo propuesto manualmente.
+Finalmente se revisaran las proyecciones y los indicadores para determinar el mejor modelo. 
 
 # 4 - Selección del mejor modelo
 
@@ -601,6 +595,6 @@ acc_todos %>%
 
 ```
 
-Finalmente, se obtienen los valores de prónostico de 3 modelos a contrastar: Holt-Winters, ARIMA y X13. Se puede apreciar facilmente que el Holt-Winters fue el mas alejado de los valores reales. Entre los modelos ARIMA se puede observar que tienen, en términos gráficos, resultados similares. Moviendonos al analisis de los indicadores de ajuste se puede ver que estos 2 últimos modelos de igual forma son los que obtienen los mejores indicadores pero en términos generales el modelo de ARIMA propuesto por el X13 posee mejor ajuste y es entonces que se selecciona como el mejor modelo lineal para predecir el número de autos importados por mes en Costa Rica. 
+Finalmente, se obtienen los valores de prónostico de 3 modelos a contrastar: Holt-Winters, ARIMA y X13. Se puede apreciar facilmente que el ARIMA manual fue el mas alejado de los valores reales. Entre los otros 2 modelos se puede observar que tienen, en términos gráficos, resultados similares. Moviendonos al analisis de los indicadores de ajuste se puede ver que estos 2 últimos modelos de igual forma son los que obtienen los mejores indicadores pero en términos generales el modelo de Holt-Winters posee mejor ajuste y es entonces que se selecciona como el mejor modelo lineal para predecir el número de autos importados por mes en Costa Rica. 
 
 
