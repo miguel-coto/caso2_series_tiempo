@@ -1,0 +1,415 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(here)
+library(readxl)
+#library(papeR)
+#library(outliers)
+library(kableExtra)
+#library(DataExplorer)
+library(lubridate)
+library(forecast)
+library(nlme)
+#library(nortest)
+library(ggfortify)
+library(dygraphs)
+#library(seasonal)
+#library(seasonalview)
+
+library(nonlinearTseries)
+library(fNonlinear)
+library(fGarch)
+library(TSA)
+library(tsDyn)
+
+library(tidyverse)
+
+```
+
+Rutas
+```{r}
+raw_data <- here("data", "raw")
+interim_data <- here("data", "interim")
+final_data <- here("data", "processed")
+
+```
+
+Leyendo base de datos
+```{r}
+base <- read_excel(paste0(raw_data,"/Base Datos.xlsx"), 
+    col_types = c("text", "numeric", "numeric"))
+
+head(base)
+```
+
+Extrayendo la base de colones y de dolares
+```{r}
+
+colones <- data_frame(date = base$`Activo neto`,
+                  col =  as.double(base$CRC)) %>%
+  mutate(date = ymd(paste0(date, "-01"))) %>%
+  mutate(year = as.factor(year(date)),
+         month = as.factor(month(date)))
+
+head(colones)
+```
+
+Convirtiendo los datos a series de tiempo
+```{r}
+# Colones
+
+# 6 periodos para utilizar a modo de validación
+colones_val <- colones %>% 
+  slice_tail(n = 6)
+
+# Serie completa para el analisis exploratorio
+colones_full <- colones
+
+# 10 años de datos para modelar
+colones <- colones %>% 
+  filter(date>"2007-12-01" & date<="2020-01-01")
+
+# Objetos ts tanto para la serie completa como para la serie de modelado
+colones_ts_full <- ts(colones_full$col, start = c(2001,2), frequency = 12)
+colones_ts <- ts(colones$col, start = c(2008,1), frequency = 12)
+colones_ts_val <- tail(colones_ts_full, 6)
+
+```
+
+# 1 Comprobacion de linealidad de la serie
+
+## 1.1 Prueba de linealidad de la media
+
+```{r}
+
+# Null hypothesis: Linearity in "mean"
+tnnTest(colones_ts, lag = 1, title = NULL, description = NULL)
+
+```
+La hipótesis nula del Teraesvirta Neural Network Test es que la media de la serie es lineal. Al rechazarse la hipótesis con una confianza del 95% se puede decir que la serie es no lineal.
+
+# 1.2 Prueba para determinar si es caotica o no
+
+```{r}
+options(max.print=1000000)
+rqa.analysis=rqa(time.series = colones_ts, embedding.dim=1, time.lag=1,radius=0.01,lmin=2,vmin=2,do.plot=TRUE,distanceToBorder=2)
+
+```
+# 2. Inspección
+```{r}
+# Una forma visual de empezar a revisar si existen o no clusters de volatilidad 
+
+colones_ts_nd <-diff(log(colones_ts))
+
+
+colones_ts_nd2<-colones_ts_nd-mean(colones_ts_nd) # Es el cambio relativo ajustado por la media en el tipo de cambio 
+#colones_ts_nd2
+
+colones_ts_nd3<-colones_ts_nd2^2 # Medida de la volatilidad. Al ser una cantidad al cuadrado, su valor ser? alto en periodos en que se experimenten grandes cambios  y comparativamente peque?o cuando sucedan cambios modestos en los precios de dichos bienes. 
+
+plot(colones_ts_nd3)
+```
+
+En este gráfico de la serie ajustada por la media y elevada al cuadrado se pretende observar 
+la volatilidad de la misma. Al ser una cantidad al cuadrado, cuando su valor ses alto en indica que se experimenten grandes cambios  y comparativamente pequeño cuando sucedan cambios modestos en los precios de dichos bienes. Es así que es claro que después del 2008, alrededor del 2014 y en el 2020 es
+donde se presentan los mayores cambios comparativos y es efectivamente en donde se 
+identifican crisis económicas que llevaron a la gente a buscar estas opciones de inversión. 
+
+```{r}
+plot(colones_ts_nd,type="l"); abline(h=0)
+qqnorm(colones_ts_nd); qqline(colones_ts_nd)
+acf(as.vector(colones_ts_nd))
+pacf(as.vector(colones_ts_nd))
+
+```
+
+```{r}
+#Graficos para corroborar independencia(ruido blanco) que es diferente de correlaci?n (medida de dependencia lineal).
+#Ho:residuos son independientes
+
+acf(colones_ts_nd^2)
+pacf(colones_ts_nd^2)
+
+acf(abs(colones_ts_nd))
+pacf(abs(colones_ts_nd))
+```
+
+En este caso algunas estacas se salen (algunas autocorrelaciones son significativas) y por tanto los rendimientos no son independientes ni identicamente distribuidos.
+Las autocorrelaciones significativas de los rendimientos al cuadrado o en términos absolutos reflejan la existencia de agrupamiento de volatilidad.
+
+```{r}
+#McLeod.Li (Box-Ljung) test muestra una evidencia fuerte de heterocedasticidad condicional(p-value significativo). 
+TSA::McLeod.Li.test(y=colones_ts_nd)
+
+```
+ Además, a partir del test de McLeod.Li (Box-Ljung) se muestra evidencia fuerte de heterocedasticidad condicional ya que varios p-value son significativos.
+ 
+# 3. Modelos
+
+## 3.1 GARCH
+
+```{r}
+garch_mod <- garchFit(~arma(0,0)+garch(1,1), data=colones_ts_nd,include.mean = FALSE)
+
+summary(garch_mod)
+```
+
+### 3.1.1 - Chequeo del modelo
+
+```{r}
+acf(residuals(garch_mod)^2)
+pacf(residuals(garch_mod)^2)
+
+```
+
+```{r}
+#1. Test de Portmanteu para residuos estandarizados al cuadrado donde la Ho es que los residuos no est?n correlacionados.
+
+try(
+gBox(garch_mod,method="absolut", plot = T)
+)
+
+```
+ 
+ A partir de esta prueba y sumado a la inspección visual se determina que los residuos del modelo Garch estan correlacionados pues el p-value es mayor al punto de corte (0.05) y varias estacas en los
+ gráficos son significativas.
+ 
+```{r}
+fGarch::predict(garch_mod, n.ahead = 6,mse="uncond",plot=TRUE, crit_val=2)
+
+```
+ Por último, se observa que el ajuste del modelo en términos de predicción es muy deficiente.
+ 
+## 3.2 Redes neuronales
+ 
+```{r}
+nn_mod<-nnetar(colones_ts_nd)
+summary(nn_mod)
+
+```
+
+
+```{r}
+acf(residuals(nn_mod)[!is.na(residuals(nn_mod))]^2)
+pacf(residuals(nn_mod)[!is.na(residuals(nn_mod))]^2)
+
+```
+```{r}
+#1. Test de Portmanteu para residuos estandarizados al cuadrado donde la Ho es que los residuos no est?n correlacionados.
+
+gBox(nn_mod,method="absolut", plot = T)
+
+```
+ 
+ A partir de esta prueba y sumado a la inspección visual se determina que los residuos del modelo Garch estan correlacionados pues el p-value es mayor al punto de corte (0.05) y un par de estacas en los
+ gráficos son significativas.
+
+```{r}
+pred_nn_mod<-forecast::forecast(nn_mod,level = c(95), h=6, bootstrap=TRUE, npaths=10000)
+pred_nn_mod
+
+plot(pred_nn_mod)
+```
+Finalmente, se observa que aunque mejor que el modelo Garch, el modelo de redes neuronales
+tampoco tienen un buen ajuste en las predicciones. 
+
+## 3.3 Modelo autoregresivo aditivo no lineal
+
+### 3.3.1 Encontrar dimensión de encrustación
+
+```{r}
+dimension = estimateEmbeddingDim(colones_ts_nd, time.lag=1, max.embedding.dim=15,threshold=0.95, do.plot=TRUE)
+
+```
+### 3.3.2 Modelo
+```{r}
+aar_mod <- aar(colones_ts_nd, m=dimension)
+summary(aar_mod)
+plot(aar_mod)
+
+```
+### 3.3.3 Revision del modelo
+
+```{r}
+e_aar_mod <- residuals(aar_mod)
+plot(e_aar_mod)
+e_aar_mod <- e_aar_mod[!is.na(e_aar_mod)]
+acf(e_aar_mod)
+pacf(e_aar_mod)
+
+```
+
+```{r}
+AIC(aar_mod)
+mse(aar_mod)
+MAPE(aar_mod)
+#fitted(aar_mod)
+#coef(aar_mod)
+
+```
+
+
+```{r}
+pred_aar <- predict(aar_mod, n.ahead=6)
+
+autoplot(ts(c(colones_ts_nd, pred_aar), start = start(colones_ts_nd), frequency = frequency(colones_ts_nd)) )
+
+```
+Se observa que las medidas de ajuste (MSE y MAPE) no son malas y la predicción para los 6 periodos
+es mejor que el modelo Garch pero hay que comparar con los demás para determinar cual obtiene mejor ajuste.
+
+## 3.4 Modelo STAR (Smooth Transition AutoRegressive)
+
+
+
+```{r}
+star_mod <- star(colones_ts_nd, mTh=c(0,1), control=list(maxit=10000))
+summary(star_mod)
+plot(star_mod)
+```
+
+
+```{r}
+e_star_mod <- residuals(star_mod)
+plot(e_star_mod)
+e_star_mod <- e_star_mod[!is.na(e_star_mod)]
+acf(e_star_mod)
+pacf(e_star_mod)
+```
+
+```{r}
+AIC(star_mod)
+mse(star_mod)
+MAPE(star_mod)
+
+
+```
+
+
+```{r}
+pred_star <- predict(star_mod, n.ahead=6)
+
+autoplot(ts(c(colones_ts_nd, pred_star), start = start(colones_ts_nd), frequency = frequency(colones_ts_nd)) )
+
+```
+
+Los indicadores del modelo Star son mejores que los del modelo Aar, tanto el AIC, como el MSE y MAPE. 
+Los resultados del pronóstico son similares entre los 2 modelos y es por esta razón que se procede a 
+revisar los pronósticos de todos los modelos no lineales para determinar el mejor. 
+
+# 4 - Selección del mejor modelo
+
+Una vez teniendo los modelos de suavizamiento exponencial, de regresión y Box-Jenkings (ARIMA) se procede a compararlos en términos de ajuste visual y de indicadores de ajuste para determinar cual es el mejor modelo que pronostique el número de muertes por accidentes de tránsito en Costa Rica. 
+
+
+```{r  warning=FALSE}
+# Prediccion redes neuronales
+f_mod1 <-
+  exp(
+      log(colones_ts[145]) + cumsum(pred_nn_mod$mean)
+    )
+
+f_mod1_ts = ts(
+  f_mod1,
+  frequency = 12,
+  start = c(2020, 2),
+  end = c(2020, 7)
+)
+
+# Prediccion modelo aar
+f_mod2 <-
+  exp(
+      log(colones_ts[145]) + cumsum(pred_aar)
+    )
+
+f_mod2_ts = ts(
+  f_mod2,
+  frequency = 12,
+  start = c(2020, 2),
+  end = c(2020, 7)
+)
+
+# Prediccion modelo Star
+f_mod3 <-
+  exp(
+      log(colones_ts[145]) + cumsum(pred_star)
+    )
+
+f_mod3_ts = ts(
+  f_mod3,
+  frequency = 12,
+  start = c(2020, 2),
+  end = c(2020, 7)
+)
+
+
+todos_preds <- cbind(
+  Serie = colones_ts,
+  Real = colones_ts_val,
+  Prediccion1 = f_mod1_ts,
+  Prediccion2 = f_mod2_ts,
+  Prediccion3 = f_mod3_ts
+)
+
+# Graficamos
+dygraph(todos_preds, main = "Predicción todos los modelos") %>%
+dySeries("Serie", label = "Cantidad") %>%
+dySeries("Real", label = "Real") %>%
+#dySeries("Prediccion1", label = "SES") %>%
+#dySeries("Prediccion2", label = "Holt") %>%
+dySeries("Prediccion1", label = "Red_neuronal") %>%
+dySeries("Prediccion2", label = "AAR") %>%
+dySeries("Prediccion3", label = "STAR") %>%
+dyAxis("x", label = "Meses") %>% 
+dyAxis("y", label = "Accidentes") %>% 
+dyOptions(colors = RColorBrewer::brewer.pal(7, "Set1")) %>% 
+dyRangeSelector()
+
+
+acc_todos <- tibble(
+  Metodo = c("Red_neuronal", "AAR", "STAR"),
+  RMSE = round(
+    c(
+      forecast::accuracy(f_mod1_ts, colones_ts_val)[2],
+      forecast::accuracy(f_mod2_ts, colones_ts_val)[2],
+      forecast::accuracy(f_mod3_ts, colones_ts_val)[2]
+    ),
+    3
+  ),
+  MAE = round(
+    c(
+      forecast::accuracy(f_mod1_ts, colones_ts_val)[3],
+      forecast::accuracy(f_mod2_ts, colones_ts_val)[3],
+      forecast::accuracy(f_mod3_ts, colones_ts_val)[3]
+    ),
+    3
+  ),
+  MAPE = round(
+    c(
+      forecast::accuracy(f_mod1_ts, colones_ts_val)[5],
+      forecast::accuracy(f_mod2_ts, colones_ts_val)[5],
+      forecast::accuracy(f_mod3_ts, colones_ts_val)[5]
+    ),
+    3
+  )
+) 
+
+acc_todos %>% 
+  mutate_if(is.numeric, function(x) {
+    cell_spec(x, bold = T, 
+              color = spec_color(x, end = 0.9, direction = -1),
+              font_size = spec_font_size(x, begin = 12,end = 14, scale_from = NA))
+  }) %>%
+  kable(escape = F, caption = "Medidas de ajuste (Todos los modelos)", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+```
+
+Finalmente, se obtienen los valores de pronostico de 3 modelos a contrastar: Red neuronal, AAR y STAR. Se puede apreciar que el STAR fue el mas alejado de los valores reales. Entre los otros modelos se puede observar que tienen, en términos gráficos, resultados similares aunque difieren al final del periodo de prueba donde la red neuronal ajusta mejor. Moviendonos al análisis de los indicadores de ajuste se puede ver que la red neuronal fue el modelo que obtuvo los mejores indicadores  y es entonces que se selecciona como el mejor modelo no lineal para predecir el número de autos importados por mes en Costa Rica. 
+
+
+
+
