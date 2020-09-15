@@ -1,0 +1,460 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+library(here)
+library(readxl)
+
+library(kableExtra)
+library(lubridate)
+
+library(workflows)
+library(parsnip)
+library(recipes)
+library(yardstick)
+library(glmnet)
+library(tidyverse)
+library(tidyquant)
+library(timetk) 
+library(dygraphs)
+
+library(mlr)
+```
+
+Rutas
+```{r}
+raw_data <- here("data", "raw")
+interim_data <- here("data", "interim")
+final_data <- here("data", "processed")
+
+```
+
+Leyendo base de datos
+```{r}
+base <- read_excel(paste0(raw_data,"/Base Datos.xlsx"), 
+    col_types = c("text", "numeric", "numeric"))
+
+head(base)
+```
+
+Extrayendo la base de colones y de dolares
+```{r}
+
+colones <- data_frame(date = base$`Activo neto`,
+                  value =  as.double(base$CRC)) %>%
+  mutate(date = ymd(paste0(date, "-01"))) #%>%
+  #mutate(year = as.factor(year(date)),
+   #      month = as.factor(month(date)))
+
+head(colones)
+```
+
+Convirtiendo los datos a series de tiempo
+```{r}
+# Colones
+
+# 6 periodos para utilizar a modo de validación
+colones_val <- colones %>% 
+  slice_tail(n = 6)
+
+# Serie completa para el analisis exploratorio
+#colones_full <- colones
+
+# 10 años de datos para modelar
+colones_mod <- colones %>%
+  filter(date>"2007-12-01" & date<="2020-01-01")
+
+# Objetos ts tanto para la serie completa como para la serie de modelado
+colones_ts_full <- ts(colones$value, start = c(2001,2), frequency = 12)
+colones_ts <- ts(colones_mod$value, start = c(2008,1), frequency = 12)
+colones_ts_val <- tail(colones_ts_full, 6)
+
+decomp_colones = decompose(colones_ts_full, "multiplicative")
+
+
+```
+
+# 1. Visualizando la región de entrenamiento y de testing
+```{r}
+colones %>%
+    ggplot(aes(x = date, y = value)) +
+    geom_rect(xmin = as.numeric(ymd("2020-02-01")),
+              xmax = as.numeric(ymd("2020-08-01")),
+              ymin = 0, ymax = 1100000,
+              fill = palette_light()[[4]], alpha = 0.01) +
+    annotate("text", x = ymd("2010-02-01"), y = 750000,
+             color = palette_light()[[1]], label = "Región entrenamiento") +
+    annotate("text", x = ymd("2020-03-01"), y = 250000,
+             color = palette_light()[[1]], label = "Región de \nprueba") +
+    geom_point(alpha = 0.5, color = palette_light()[[1]]) +
+    labs(title = "Bikes Sharing Dataset: Daily Scale", x = "", y="") +
+    theme_tq()
+```
+
+Split into training and test sets
+```{r}
+train_tbl <- colones %>% filter(date < ymd("2020-02-01"))
+test_tbl  <- colones %>% filter(date >= ymd("2020-02-01"))
+```
+
+
+# 2. Añadiendo variables de tiempo
+```{r}
+recipe_spec_timeseries <- recipe(value ~ ., data = train_tbl) %>%
+    step_timeseries_signature(date) 
+```
+
+```{r}
+recipe_spec_final <- recipe_spec_timeseries %>%
+    step_rm(date) %>%
+    step_rm(contains("iso"), 
+            contains("second"), contains("minute"), contains("hour"),
+            contains("am.pm"), contains("xts"), contains("week"),
+            contains("day"), contains("wday")) %>%
+    step_normalize(contains("index.num"), date_year) %>%
+    #step_interact(~ date_month.lbl * date_day) %>%
+    #step_interact(~ date_month.lbl * date_mweek) %>%
+    #step_interact(~ date_month.lbl * date_wday.lbl * date_yday) %>%
+    step_dummy(contains("lbl"), one_hot = TRUE) 
+
+
+
+```
+
+## 2.1 Datos
+```{r}
+
+train_data <- bake(prep(recipe_spec_final), new_data = colones) %>% 
+   slice(1:(n()-6))
+
+test_data <- bake(prep(recipe_spec_final), new_data = colones)  %>% 
+   slice((n()-5):n())
+
+head(train_data)
+```
+
+## 2.2 Datos con rezago (1, 3 y 6 meses)
+```{r}
+
+train_data_decomp <- bake(prep(recipe_spec_final), new_data = colones) %>% 
+  mutate(lag1 = lag(value,1), 
+         lag3 = lag(value,3),
+         lag6 = lag(value,6)) %>% 
+   filter(!is.na(lag6)) %>% 
+   slice(1:(n()-6))
+
+test_data_decomp <- bake(prep(recipe_spec_final), new_data = colones)  %>% 
+  mutate(lag1 = lag(value,1), 
+         lag3 = lag(value,3),
+         lag6 = lag(value,6)) %>% 
+   filter(!is.na(lag6)) %>% 
+   slice((n()-5):n())
+
+head(train_data_decomp)
+```
+
+# 3 Benchmark de modelos
+
+Tareas
+```{r}
+
+regr.task = makeRegrTask(data = train_data, target = "value")
+regr.task.decomp = makeRegrTask(data = train_data_decomp, target = "value")
+
+tasks <- list(regr.task, regr.task.decomp)
+
+test.task = makeRegrTask(data = test_data, target = "value")
+test.task.decomp = makeRegrTask(data = test_data_decomp, target = "value")
+
+```
+
+## 3.1 Modelos seleccionados
+Se seleccionaron los siguientes modelos:
+-   Regresion regularizada
+-   Gradient boosting
+-   Deep learning
+-   Knn
+-   Arbboles de decision
+-   Random forest
+-   XGboost
+
+```{r}
+bay_reg <- makeLearner("regr.blm")
+glmnet <- makeLearner("regr.glmnet")
+gbm_reg <- makeLearner("regr.gbm")
+dl_reg <- makeLearner("regr.h2o.deeplearning")
+knn_reg <- makeLearner("regr.kknn")
+tree_reg <- makeLearner("regr.rpart")
+rf_reg <- makeLearner("regr.ranger")
+xg_reg <- makeLearner("regr.xgboost")
+
+lrns = list(
+  #bay_reg,
+  glmnet,
+  gbm_reg,
+  dl_reg,
+  knn_reg,
+  tree_reg,
+  rf_reg
+  #xg_reg
+)
+
+
+```
+
+
+Se prueban los modelos usando los indicadores de MAE, MAPE y RMSE mediante validacion cruzada con 10 hojas. 
+```{r message=FALSE, warning=FALSE}
+
+set.seed(333, "L'Ecuyer-CMRG")
+parallelMap::parallelStartMulticore(cpus = parallel::detectCores())
+
+# Choose the resampling strategy
+rdesc = makeResampleDesc("CV", iter = 10)
+
+meas = list(mae, mape, rmse)
+
+# Conduct the benchmark experiment
+bmr = benchmark(lrns, tasks, rdesc, measures = meas, show.info = F, models = T)
+
+bmr
+
+parallelMap::parallelStop()
+```
+
+# 3.2 Indicadores para los modelos y las 2 bases de datos
+```{r}
+plotBMRBoxplots(bmr, measure = mae, order.lrn = getBMRLearnerIds(bmr))
+plotBMRBoxplots(bmr, measure = mape, order.lrn = getBMRLearnerIds(bmr))
+plotBMRBoxplots(bmr, measure = rmse, order.lrn = getBMRLearnerIds(bmr))
+
+```
+Se eligen: ranger, gbm y glmnet y el set de datos con los rezagos (train_data_decomp)
+
+
+```{r}
+
+bmr_models <- getBMRModels(bmr)
+pred_train <- getBMRPredictions(bmr)
+```
+
+## 3.3 Ajuste para el set de training
+```{r}
+
+pred_train$train_data_decomp$regr.gbm$data %>% 
+  arrange(id) %>% 
+  mutate(date = train_tbl$date[-c(1:6)]) %>% 
+  select(date, truth, response) %>% 
+  pivot_longer(!date, names_to = "type", values_to = "value") %>% 
+  ggplot(aes(x = date, y = value, color = type)) +
+    geom_line()+
+  ggtitle("GBM")
+
+pred_train$train_data_decomp$regr.ranger$data %>% 
+  arrange(id) %>% 
+  mutate(date = train_tbl$date[-c(1:6)]) %>% 
+  select(date, truth, response) %>% 
+  pivot_longer(!date, names_to = "type", values_to = "value") %>% 
+  ggplot(aes(x = date, y = value, color = type)) +
+    geom_line()+
+  ggtitle("Ranger")
+
+pred_train$train_data_decomp$regr.glmnet$data %>% 
+  arrange(id) %>% 
+  mutate(date = train_tbl$date[-c(1:6)]) %>% 
+  select(date, truth, response) %>% 
+  pivot_longer(!date, names_to = "type", values_to = "value") %>% 
+  ggplot(aes(x = date, y = value, color = type)) +
+    geom_line()+
+  ggtitle("GLM")
+```
+# 4 Tuning de los 3 modelos seleccionados
+
+## Estimacion de hiperparametros
+
+Se optimizan los hiperparametros de los 3 modelos mediante optimizacion bayesiana usando los indicadores de MAPE, MAE y RMSE usando validacion cruzada con 10 hojas.
+
+
+ Tune glmnet
+```{r message=FALSE, warning=FALSE}
+set.seed(333, "L'Ecuyer-CMRG")
+parallelMap::parallelStartMulticore(cpus = parallel::detectCores())
+
+ps = makeParamSet( makeDiscreteParam("s", values = seq(0., 1, by=.05)), makeDiscreteParam("alpha", values = seq(0., 1, by=.05)))
+
+ctrl = makeTuneControlGrid()
+
+res = tuneParams(
+  glmnet,
+  task = regr.task.decomp,
+  resampling = rdesc,
+  par.set = ps,
+  control = ctrl,
+  show.info = F,
+  measures = meas
+)
+
+glmnet_tune = setHyperPars(glmnet, par.vals = res$x)
+
+glmnet_mod = train(glmnet_tune, regr.task.decomp)
+glmnet_predict_train <- predict(glmnet_mod, task = regr.task.decomp)
+glmnet_predict_test <- predict(glmnet_mod, task = test.task.decomp)
+
+round(performance(pred = glmnet_predict_test, measures = meas),3)
+
+parallelMap::parallelStop()
+```
+
+
+ Tune gbm
+```{r message=FALSE, warning=FALSE}
+set.seed(333, "L'Ecuyer-CMRG")
+parallelMap::parallelStartMulticore(cpus = parallel::detectCores())
+
+#parameters
+gbm_par<- makeParamSet(
+makeDiscreteParam("distribution", values = "gaussian"),
+makeIntegerParam("n.trees", lower = 100, upper = 1000), #number of trees
+makeIntegerParam("interaction.depth", lower = 2, upper = 10), #depth of tree
+makeIntegerParam("n.minobsinnode", lower = 2, upper = 10),
+makeNumericParam("shrinkage",lower = 0.01, upper = .99)
+)
+
+ctrl_gbm = makeTuneControlMBO()
+
+res_gbm = tuneParams(
+  gbm_reg,
+  task = regr.task.decomp,
+  resampling = rdesc,
+  par.set = gbm_par,
+  control = ctrl_gbm,
+  show.info = F,
+  measures = meas
+)
+
+gbm_tune = setHyperPars(gbm_reg, par.vals = res_gbm$x)
+
+gbm_mod = train(gbm_tune, regr.task.decomp)
+gbm_predict_train <- predict(gbm_mod, task = regr.task.decomp)
+gbm_predict_test <- predict(gbm_mod, task = test.task.decomp)
+
+round(performance(pred = gbm_predict_test, measures = meas),3)
+
+parallelMap::parallelStop()
+```
+
+Tune ranger
+```{r message=FALSE, warning=FALSE}
+set.seed(333, "L'Ecuyer-CMRG")
+parallelMap::parallelStartMulticore(cpus = parallel::detectCores())
+
+#parameters
+rf_par<- makeParamSet(
+makeIntegerParam("mtry", lower = 2, upper = 10), #number of trees
+makeIntegerParam("num.trees", lower = 100, upper = 1000), #depth of tree
+makeIntegerParam("min.node.size", lower = 2, upper = 10),
+makeNumericParam("sample.fraction",lower = 0.1, upper = .9)
+)
+
+ctrl_gbm = makeTuneControlMBO()
+
+res_rf = tuneParams(
+  rf_reg,
+  task = regr.task.decomp,
+  resampling = rdesc,
+  par.set = rf_par,
+  control = ctrl_gbm,
+  show.info = F,
+  measures = meas
+)
+
+rf_tune = setHyperPars(rf_reg, par.vals = res_rf$x)
+
+rf_mod = train(rf_tune, regr.task.decomp)
+rf_predict_train <- predict(rf_mod, task = regr.task.decomp)
+rf_predict_test <- predict(rf_mod, task = test.task.decomp)
+
+round(performance(pred = rf_predict_test, measures = meas),3)
+
+parallelMap::parallelStop()
+```
+
+
+
+## 4.2 Comparacion de modelos
+
+```{r  warning=FALSE}
+
+pred_1 <-  ts(
+    window(ts(glmnet_predict_test$data$response), start = 1, end = 6),
+    frequency = 12,
+    start = c(2020, 2)
+  )
+
+pred_2 <- ts(
+    window(ts(gbm_predict_test$data$response), start = 1, end = 6),
+    frequency = 12,
+    start = c(2020, 2)
+  )
+
+pred_3 <- ts(
+    window(ts(rf_predict_test$data$response), start = 1, end = 6),
+    frequency = 12,
+    start = c(2020, 2)
+  )
+
+todos_preds <- cbind(
+  Serie = colones_ts ,
+  Real = colones_ts_val,
+  Prediccion1 = pred_1,
+  Prediccion2 = pred_2,
+  Prediccion3 = pred_3
+)
+
+# Graficamos
+dygraph(todos_preds, main = "Predicción todos los modelos") %>%
+dySeries("Serie", label = "Cantidad") %>%
+dySeries("Real", label = "Real") %>%
+dySeries("Prediccion1", label = "Glm") %>%
+dySeries("Prediccion2", label = "GBM") %>%
+dySeries("Prediccion3", label = "RF") %>%
+dyAxis("x", label = "Meses") %>% 
+dyAxis("y", label = "Accidentes") %>% 
+dyOptions(colors = RColorBrewer::brewer.pal(7, "Set1")) %>% 
+dyRangeSelector()
+
+
+acc_todos <- tibble( Metodo = c("Glm","GBM","RF"),
+        RMSE = round(c(
+                       forecast::accuracy(pred_1, colones_ts_val)[2],
+                       forecast::accuracy(pred_2, colones_ts_val)[2],
+                       forecast::accuracy(pred_3, colones_ts_val)[2]),3),
+        MAE = round(c(
+                       forecast::accuracy(pred_1, colones_ts_val)[3],
+                       forecast::accuracy(pred_2, colones_ts_val)[3],
+                       forecast::accuracy(pred_3, colones_ts_val)[3]),3),
+        MAPE = round(c(
+                       forecast::accuracy(pred_1, colones_ts_val)[5],
+                       forecast::accuracy(pred_2, colones_ts_val)[5],
+                       forecast::accuracy(pred_3, colones_ts_val)[5]),3)
+        
+        ) 
+
+acc_todos %>% 
+  mutate_if(is.numeric, function(x) {
+    cell_spec(x, bold = T, 
+              color = spec_color(x, end = 0.9, direction = -1),
+              font_size = spec_font_size(x, begin = 12,end = 14, scale_from = NA))
+  }) %>%
+  kable(escape = F, caption = "Medidas de ajuste (Todos los modelos)", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+```
+
+Finalmente, se obtienen los valores de prónostico de 3 modelos a contrastar: Regresion regularizda, Random forest y Gradient boosting Se puede apreciar facilmente que el modelo de regresión fue el mas cercano de los valores reales. Moviendonos al analisis de los indicadores de ajuste se puede ver que estos tambien este último modelos es el que obtienen los mejores indicadores y es entonces que se selecciona como el mejor modelo lineal para predecir el número de autos importados por mes en Costa Rica. 
+
+
+
