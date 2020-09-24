@@ -1,6 +1,10 @@
 ---
 title: "R Notebook"
-output: html_notebook
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  word_document: default
 ---
 
 ```{r}
@@ -59,11 +63,11 @@ colones_full <- colones
 
 # 10 años de datos para modelar
 colones <- colones %>% 
-  filter(date>"2009-12-01")
+  filter(date>"2007-12-01")
 
 # Objetos ts tanto para la serie completa como para la serie de modelado
 colones_ts_full <- ts(colones_full$col, start = c(2001,2), frequency = 12)
-colones_ts <- ts(colones$col, start = c(2010,1), frequency = 12)
+colones_ts <- ts(colones$col, start = c(2008,1), frequency = 12)
 
 ```
 
@@ -130,7 +134,7 @@ año se mantiene el valor para el resto del análisis.
 ## 1.3 - Primeros graficos
 ```{r warning=FALSE}
 #GRAFICO ACCIDENTES
-plot.ts(colones_ts_full,ylab='Cantidad de accidentes',xlab="Periodo",main="Cantidad de accidentes de transito por mes\n(2000 - 2019)", lty=5,col="darkgray",bty="l",lwd=3)
+plot.ts(colones_ts_full,ylab='Montos (COL)',xlab="Periodo",main="Activo neto en colones por mes\n(2001 - 2020)", lty=5,col="darkgray",bty="l",lwd=3)
 Month=c('J','F','M','A','M','J','J','A','S','O','N','D')
 points(colones_ts_full,pch=Month,col="blue")
 
@@ -138,11 +142,11 @@ points(colones_ts_full,pch=Month,col="blue")
 autoplot(colones_ts_full)+
  # geom_point(Month)+
   scale_x_date(date_labels="%Y",date_breaks  ="2 year")+
-  labs(title = "Cantidad de accidentes de transito por mes\n(2000 - 2019)",
+  labs(title = "Activo neto en colones por mes\n(2001 - 2020)",
              # subtitle = "Plot of length by dose",
-              caption = "Fuente: INEC (2019)",
+              caption = "Fuente: SUGEVAL (2020)",
        x= "Periodo",
-       y= "Cantidad de accidentes")+
+       y= "Montos (COL)")+
   theme(
     plot.title = element_text(hjust = 0.5)
     )
@@ -154,16 +158,16 @@ autoplot(colones_ts_full)+
 ### 1.3.1 - Analisis por mes
 ```{r  warning=FALSE}
 
-seasonplot(colones_ts_full,col=viridis::viridis(12),year.labels=TRUE, main = "Cantidad de accidentes de transito por mes y año\n(2000 - 2019)")
+seasonplot(colones_ts_full,col=viridis::viridis(12),year.labels=TRUE, main = "Activo neto en colones por mes\n(2001 - 2020)")
 
-monthplot(colones_ts_full,col="blue", main= "Cantidad de accidentes de transito por mes\n(2000 - 2019)")
+monthplot(colones_ts_full,col="blue", main= "Activo neto en colones por mes\n(2001 - 2020)")
 
 ```
 
 En el gráfico se puede observar que hay tendencia de aumento a través de los casi 19 años
 analizados, y se aprecia que hubo un aumento considerable entre los años 2008 y 2010
 lo que se podría interpretar como una respuesta a la crisis del 2008 y luego hubo otro aumento 
-cerca del 2014-2015 lo que se relaciona con la crisis @@@ y por último el aumento 
+cerca del 2014-2015 y por último el aumento 
 a partir de abril del 2020 lo cual es evidente que es a causa del COVID-19. 
 En términos de estacionalidad se observa que efectivamente el promedio durante Noviembre y
 Diciembre decrece y sube en Enero y Julio. También se observa que si bien no hay muchas
@@ -177,9 +181,9 @@ Además, debido a que la variabilidad de la serie parece mantenerse a través de
 ```{r  warning=FALSE}
 decompose_colones_full = decompose(colones_ts_full, "additive")
 
-plot(as.ts(decompose_colones_full$seasonal), xlab="", ylab="Componente estacional", main= "Activo neto de los fondos del mercado de dinero\n(2001 - 2020)")
-plot(as.ts(decompose_colones_full$trend), xlab="", ylab="Componente tendencia",  main= "Activo neto de los fondos del mercado de dinero\n(2001 - 2020)")
-plot(as.ts(decompose_colones_full$random), xlab="", ylab="Componente aleatorio",  main= "Activo neto de los fondos del mercado de dinero\n(2001 - 2020)")
+plot(as.ts(decompose_colones_full$seasonal), xlab="", ylab="Componente estacional", main= "Activo neto en colones \n(2001 - 2020)")
+plot(as.ts(decompose_colones_full$trend), xlab="", ylab="Componente tendencia",  main= "Activo neto en colones \n(2001 - 2020)")
+plot(as.ts(decompose_colones_full$random), xlab="", ylab="Componente aleatorio",  main= "Activo neto en colones \n(2001 - 2020)")
 plot(decompose_colones_full, xlab="")
 
 ```
@@ -193,9 +197,9 @@ la serie pero esta vez multiplicativa.
 ```{r  warning=FALSE}
 decompose_colones_full = decompose(colones_ts_full, "multiplicative")
 
-plot(as.ts(decompose_colones_full$seasonal), xlab="", ylab="Componente estacional", main= "Activo neto de los fondos del mercado de dinero\n(2001 - 2020)")
-plot(as.ts(decompose_colones_full$trend), xlab="", ylab="Componente tendencia",  main= "Activo neto de los fondos del mercado de dinero\n(2001 - 2020)")
-plot(as.ts(decompose_colones_full$random), xlab="", ylab="Componente aleatorio",  main= "Activo neto de los fondos del mercado de dinero\n(2001 - 2020)")
+plot(as.ts(decompose_colones_full$seasonal), xlab="", ylab="Componente estacional", main= "Activo neto en colones \n(2001 - 2020)")
+plot(as.ts(decompose_colones_full$trend), xlab="", ylab="Componente tendencia",  main= "Activo neto en colones \n(2001 - 2020)")
+plot(as.ts(decompose_colones_full$random), xlab="", ylab="Componente aleatorio",  main= "Activo neto en colones \n(2001 - 2020)")
 plot(decompose_colones_full, xlab="")
 
 ```

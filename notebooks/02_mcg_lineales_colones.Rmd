@@ -1,6 +1,8 @@
 ---
 title: "R Notebook"
-output: html_notebook
+output:
+  html_document:
+    df_print: paged
 ---
 
 ```{r}
@@ -20,13 +22,24 @@ library(dygraphs)
 library(seasonal)
 library(seasonalview)
 ```
+```{r include=FALSE}
+valueFormatter<-"function formatValue(v) {
+var suffixes = ['', 'K', 'M', 'G', 'T'];
+  if (v < 1000) return v;
+  var magnitude = Math.ceil(String(Math.floor(v)).length / 3-1);
+  if (magnitude > suffixes.length - 1)
+    magnitude = suffixes.length - 1;
+  return String(Math.round(v / Math.pow(10, magnitude * 3), 2)) +suffixes[magnitude]}"
+
+```
+
 
 Rutas
 ```{r}
 raw_data <- here("data", "raw")
 interim_data <- here("data", "interim")
 final_data <- here("data", "processed")
-
+modelos <- here('models')
 ```
 
 Leyendo base de datos
@@ -84,7 +97,7 @@ APaditivo.hw <- HoltWinters (colones_ts, seasonal = "multiplicative")
 APaditivo.hw ; APaditivo.hw$SSE
 
 #descomposici?n de la serie
-plot (APaditivo.hw$fitted, main = "Descomposición de la serie  de muertes por\naccidentes de tránsito por método de Holt-Winters", xlab = "")
+plot (APaditivo.hw$fitted, main = "Descomposición de la serie  de activo neto\nen colones por método de Holt-Winters", xlab = "")
 
 #PRON?STICO aditivo 
 AP.predict <- predict(APaditivo.hw, n.ahead = 6,seasonal = "multiplicative")
@@ -101,18 +114,18 @@ HW_preds<- cbind(Serie = colones_ts, Real = colones_ts_val,Prediccion1=pred_HW)
 
 # Graficos
 dygraph(HW_preds, main = "Predicción modelo Holt-Winters") %>%
-dySeries("Serie", label = "Cantidad") %>%
-dySeries("Real", label = "Real") %>%
+dySeries("Serie", label = "Entrenamiento") %>%
+dySeries("Real", label = "Prueba") %>%
 dySeries("Prediccion1", label = "Predicción") %>%
-dyAxis("x", label = "Meses") %>% 
-dyAxis("y", label = "Accidentes") %>% 
-dyOptions(colors = RColorBrewer::brewer.pal(3, "Set1")) %>% 
+dyAxis("x", label = "Periodo") %>% 
+dyAxis("y", label = "Montos (COL)") %>% 
+dyOptions(maxNumberWidth = 20, colors = RColorBrewer::brewer.pal(3, "Set1")) %>% 
 dyRangeSelector()
 
 
 
-acc_hotlWint <- tibble( Metodo = c("Serie completa",
-                   "Pronóstico"),
+acc_hotlWint <- tibble( Metodo = c("Serie de entrenamiento",
+                   "Serie de prueba"),
         RMSE = round(c(forecast::accuracy(AP.predict2, colones_ts_val)[,2]),3),
         MAE = round(c(forecast::accuracy(AP.predict2, colones_ts_val)[,3]),3),
         MAPE = round(c(forecast::accuracy(AP.predict2, colones_ts_val)[,5]),3),
@@ -152,7 +165,7 @@ Seas <- cycle(colones_ts)
 model1=lm(colones_ts~x++ factor(Seas))
 summary(model1)
 
-plot(colones_ts,type='o',main='', xlab = "", ylab = "Muertes por accidentes de tránsito")
+plot(colones_ts,type='o',main='', xlab = "", ylab = "Activo neto en colones")
 abline(model1, col="red")
 ```
 
@@ -175,7 +188,7 @@ normtest::geary.norm.test(model1$residuals) #Prueba de Geary
 
 ```
 
-En el análisis de los residuos, en primer lugar, se intenta probar que estos tengan una distribución normal. Para esto se relizaron los gráficos de histograma y de qqnorm en donde hay indicios de que la distribución es normal pero tiene una cola pesada a la derecha.
+En el análisis de los residuos, en primer lugar, se intenta probar que estos tengan una distribución normal. Para esto se realizaron los gráficos de histograma y de qqnorm en donde hay indicios de que la distribución es normal pero tiene una cola pesada a la derecha.
 Para completar el análisis se prueba de manera formal la hipótesis de que los residuos se distribuyen normalmente mediante 3 pruebas: Jarque-Bera, Frosini y Geary. Para todas, la hipótesis nula es que la muestra se distribuye normalmente y 2 de ellas se rechazaron con un nivel de significancia del 95%, por lo tanto, se concluye que los residuos de la regresión lineal No se distribuyen normalmente. 
 
 ##### 3.1.1.1.2 - Heterocedasticidad
@@ -236,7 +249,7 @@ Entonces se procede a diferenciar la serie y aplicarle logaritmo natural para tr
 *Diferenciacion y logaritmo*
 
 ```{r  warning=FALSE}
-dygraph(diff(log(colones_ts)),main="Muertes por accidentes de tránsito - Primera diferencia y Logaritmo",ylab='Dif(log(y))',xlab="Periodo") %>% dyRangeSelector()
+dygraph(diff(log(colones_ts)),main="Activo neto en colones - Primera diferencia y Logaritmo",ylab='Dif(log(y))',xlab="Periodo") %>% dyRangeSelector()
 
 layout(1:2)
 acf(diff(log(colones_ts)), lag.max = 36)
@@ -502,7 +515,7 @@ pacf(resid(mod4))
 
 # 4 - Selección del mejor modelo
 
-Una vez teniendo los modelos de suavizamiento exponencial, de regresión y Box-Jenkings (ARIMA) se procede a compararlos en términos de ajuste visual y de indicadores de ajuste para determinar cual es el mejor modelo que pronostique el número de muertes por accidentes de tránsito en Costa Rica. 
+Una vez teniendo los modelos de Holt-Winters, de regresión y Box-Jenkings (ARIMA) se procede a compararlos en términos de ajuste visual y de indicadores de ajuste para determinar cual es el mejor modelo que pronostique el áctivo neto en colones. 
 
 
 ```{r  warning=FALSE}
@@ -539,18 +552,18 @@ todos_preds <- cbind(
 )
 
 # Graficamos
-dygraph(todos_preds, main = "Predicción todos los modelos") %>%
-dySeries("Serie", label = "Cantidad") %>%
-dySeries("Real", label = "Real") %>%
+dygraph(todos_preds, main = "Predicción de todos los modelos") %>%
+dySeries("Serie", label = "Entrenamiento") %>%
+dySeries("Real", label = "Prueba") %>%
 #dySeries("Prediccion1", label = "SES") %>%
 #dySeries("Prediccion2", label = "Holt") %>%
 dySeries("Prediccion1", label = "Holt-Winters") %>%
 #dySeries("Prediccion4", label = "Regresion") %>%
 dySeries("Prediccion2", label = "ARIMA") %>%
 dySeries("Prediccion3", label = "ARIMA_X13") %>%
-dyAxis("x", label = "Meses") %>% 
-dyAxis("y", label = "Accidentes") %>% 
-dyOptions(colors = RColorBrewer::brewer.pal(7, "Set1")) %>% 
+dyAxis("x", label = "Periodo") %>% 
+dyAxis("y", label = "Montos (COL)") %>% 
+dyOptions(maxNumberWidth = 20,colors = RColorBrewer::brewer.pal(7, "Set1")) %>% 
 dyRangeSelector()
 
 
@@ -592,6 +605,12 @@ acc_todos %>%
 
 ```
 
-Finalmente, se obtienen los valores de prónostico de 3 modelos a contrastar: Holt-Winters, ARIMA y X13. Se puede apreciar facilmente que el Holt-Winters fue el mas alejado de los valores reales. Entre los modelos ARIMA se puede observar que tienen, en términos gráficos, resultados similares. Moviendonos al analisis de los indicadores de ajuste se puede ver que estos 2 últimos modelos de igual forma son los que obtienen los mejores indicadores pero en términos generales el modelo de ARIMA estimado de forma manual posee mejor ajuste y es entonces que se selecciona como el mejor modelo lineal para predecir el número de autos importados por mes en Costa Rica. 
+Finalmente, se obtienen los valores de prónostico de 3 modelos a contrastar: Holt-Winters, ARIMA y X13. Se puede apreciar facilmente que el Holt-Winters fue el mas alejado de los valores reales. Entre los modelos ARIMA se puede observar que tienen, en términos gráficos, resultados similares. Moviendonos al analisis de los indicadores de ajuste se puede ver que estos 2 últimos modelos de igual forma son los que obtienen los mejores indicadores pero en términos generales el modelo de ARIMA estimado de forma manual posee mejor ajuste y es entonces que se selecciona como el mejor modelo lineal para predecir valor del activo neto en colones.  
+
+```{r include=FALSE}
+
+saveRDS(mod3, file = paste0(modelos, "/modelo_lineal_colones.Rds"))
+
+```
 
 

@@ -1,6 +1,8 @@
 ---
 title: "R Notebook"
-output: html_notebook
+output:
+  html_document:
+    df_print: paged
 ---
 
 ```{r}
@@ -34,6 +36,7 @@ Rutas
 raw_data <- here("data", "raw")
 interim_data <- here("data", "interim")
 final_data <- here("data", "processed")
+modelos <- here('models')
 
 ```
 
@@ -356,15 +359,15 @@ todos_preds <- cbind(
 
 # Graficamos
 dygraph(todos_preds, main = "Predicción todos los modelos") %>%
-dySeries("Serie", label = "Cantidad") %>%
-dySeries("Real", label = "Real") %>%
+dySeries("Serie", label = "Entrenamiento") %>%
+dySeries("Real", label = "Prueba") %>%
 #dySeries("Prediccion1", label = "SES") %>%
 #dySeries("Prediccion2", label = "Holt") %>%
 dySeries("Prediccion1", label = "Red_neuronal") %>%
 dySeries("Prediccion2", label = "AAR") %>%
 dySeries("Prediccion3", label = "STAR") %>%
 dyAxis("x", label = "Meses") %>% 
-dyAxis("y", label = "Accidentes") %>% 
+dyAxis("y", label = "Montos (COL)") %>% 
 dyOptions(colors = RColorBrewer::brewer.pal(7, "Set1")) %>% 
 dyRangeSelector()
 
@@ -408,8 +411,11 @@ acc_todos %>%
 
 ```
 
-Finalmente, se obtienen los valores de pronostico de 3 modelos a contrastar: Red neuronal, AAR y STAR. Se puede apreciar que el STAR fue el mas alejado de los valores reales. Entre los otros modelos se puede observar que tienen, en términos gráficos, resultados similares aunque difieren al final del periodo de prueba donde la red neuronal ajusta mejor. Moviendonos al análisis de los indicadores de ajuste se puede ver que la red neuronal fue el modelo que obtuvo los mejores indicadores  y es entonces que se selecciona como el mejor modelo no lineal para predecir el número de autos importados por mes en Costa Rica. 
+En terminos de medidas de ajuste se puede discernir que el mejor modelo es el STAR pues posee mejores indicadores tanto para MAE como para MAPE, seguido del modelo de redes neuronales en donde obtuvo el mejor indicador en el RMSE. En el apartado gráfico se observa que las conclusiones son un poco distantas pues el modelo que mas e acerca es el de redes nueronales, especialmente al final del pronostico pues sigue la tendencia que lleva la serie original hacia la alta. 
 
+```{r include=FALSE}
 
+saveRDS(nn_mod, file = paste0(modelos, "/modelo_no_lineal_colones.Rds"))
 
+```
 

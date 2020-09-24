@@ -1,6 +1,8 @@
 ---
 title: "R Notebook"
-output: html_notebook
+output:
+  html_document:
+    df_print: paged
 ---
 
 
@@ -29,7 +31,7 @@ Rutas
 raw_data <- here("data", "raw")
 interim_data <- here("data", "interim")
 final_data <- here("data", "processed")
-
+modelos <- here('models')
 ```
 
 Leyendo base de datos
@@ -70,7 +72,7 @@ colones_mod <- colones %>%
 # Objetos ts tanto para la serie completa como para la serie de modelado
 colones_ts_full <- ts(colones$value, start = c(2001,2), frequency = 12)
 colones_ts <- ts(colones_mod$value, start = c(2008,1), frequency = 12)
-colones_ts_val <- tail(colones_ts_full, 6)
+colones_ts_val <- ts(tail(colones_ts_full, 6), start = c(2020,2), frequency = 12)
 
 decomp_colones = decompose(colones_ts_full, "multiplicative")
 
@@ -90,11 +92,11 @@ colones %>%
     annotate("text", x = ymd("2020-03-01"), y = 250000,
              color = palette_light()[[1]], label = "Región de \nprueba") +
     geom_point(alpha = 0.5, color = palette_light()[[1]]) +
-    labs(title = "Bikes Sharing Dataset: Daily Scale", x = "", y="") +
+    labs(title = "Activo neto en colones", x = "", y="") +
     theme_tq()
 ```
 
-Split into training and test sets
+Partiendo la base en entrenamiento y prueba
 ```{r}
 train_tbl <- colones %>% filter(date < ymd("2020-02-01"))
 test_tbl  <- colones %>% filter(date >= ymd("2020-02-01"))
@@ -182,14 +184,14 @@ Se seleccionaron los siguientes modelos:
 -   XGboost
 
 ```{r}
-bay_reg <- makeLearner("regr.blm")
+#bay_reg <- makeLearner("regr.blm")
 glmnet <- makeLearner("regr.glmnet")
 gbm_reg <- makeLearner("regr.gbm")
 dl_reg <- makeLearner("regr.h2o.deeplearning")
 knn_reg <- makeLearner("regr.kknn")
 tree_reg <- makeLearner("regr.rpart")
 rf_reg <- makeLearner("regr.ranger")
-xg_reg <- makeLearner("regr.xgboost")
+#xg_reg <- makeLearner("regr.xgboost")
 
 lrns = list(
   #bay_reg,
@@ -227,9 +229,9 @@ parallelMap::parallelStop()
 
 # 3.2 Indicadores para los modelos y las 2 bases de datos
 ```{r}
-plotBMRBoxplots(bmr, measure = mae, order.lrn = getBMRLearnerIds(bmr))
-plotBMRBoxplots(bmr, measure = mape, order.lrn = getBMRLearnerIds(bmr))
-plotBMRBoxplots(bmr, measure = rmse, order.lrn = getBMRLearnerIds(bmr))
+plotBMRBoxplots(bmr, measure = mae, order.lrn = getBMRLearnerIds(bmr)) + ylab("MAE")
+plotBMRBoxplots(bmr, measure = mape, order.lrn = getBMRLearnerIds(bmr)) + ylab("MAPE")
+plotBMRBoxplots(bmr, measure = rmse, order.lrn = getBMRLearnerIds(bmr)) + ylab("RMSE")
 
 ```
 Se eligen: ranger, gbm y glmnet y el set de datos con los rezagos (train_data_decomp)
@@ -416,13 +418,13 @@ todos_preds <- cbind(
 
 # Graficamos
 dygraph(todos_preds, main = "Predicción todos los modelos") %>%
-dySeries("Serie", label = "Cantidad") %>%
-dySeries("Real", label = "Real") %>%
+dySeries("Serie", label = "Entrenamiento") %>%
+dySeries("Real", label = "Prueba") %>%
 dySeries("Prediccion1", label = "Glm") %>%
 dySeries("Prediccion2", label = "GBM") %>%
 dySeries("Prediccion3", label = "RF") %>%
 dyAxis("x", label = "Meses") %>% 
-dyAxis("y", label = "Accidentes") %>% 
+dyAxis("y", label = "Montos (COL)") %>% 
 dyOptions(colors = RColorBrewer::brewer.pal(7, "Set1")) %>% 
 dyRangeSelector()
 
@@ -456,5 +458,9 @@ acc_todos %>%
 
 Finalmente, se obtienen los valores de prónostico de 3 modelos a contrastar: Regresion regularizda, Random forest y Gradient boosting Se puede apreciar facilmente que el modelo de regresión fue el mas cercano de los valores reales. Moviendonos al analisis de los indicadores de ajuste se puede ver que estos tambien este último modelos es el que obtienen los mejores indicadores y es entonces que se selecciona como el mejor modelo lineal para predecir el número de autos importados por mes en Costa Rica. 
 
+```{r include=FALSE}
 
+saveRDS(glmnet_mod, file = paste0(modelos, "/modelo_ml_colones.Rds"))
+
+```
 
