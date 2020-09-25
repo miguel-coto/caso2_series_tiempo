@@ -1,0 +1,364 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r}
+library(here)
+library(readxl)
+
+library(kableExtra)
+library(lubridate)
+library(tidyverse)
+library(tidyquant)
+library(timetk) 
+library(dygraphs)
+library(forecast)
+library(recipes)
+library(tsDyn)
+library(mlr)
+```
+
+Rutas
+```{r}
+raw_data <- here("data", "raw")
+interim_data <- here("data", "interim")
+final_data <- here("data", "processed")
+modelos <- here('models')
+```
+
+Leyendo base de datos
+```{r}
+base <- read_excel(paste0(raw_data,"/Base Datos.xlsx"), 
+    col_types = c("text", "numeric", "numeric"))
+
+head(base)
+```
+
+Extrayendo la base de dolares y de dolares
+```{r}
+colones <- data_frame(date = base$`Activo neto`,
+                  value =  as.double(base$CRC)) %>%
+  mutate(date = ymd(paste0(date, "-01"))) 
+
+dolares <- data_frame(date = base$`Activo neto`,
+                  value =  as.double(base$USD)) %>%
+  mutate(date = ymd(paste0(date, "-01"))) 
+
+head(colones)
+head(dolares)
+```
+
+Convirtiendo los datos a series de tiempo
+```{r}
+# dolares
+
+# 6 periodos para utilizar a modo de validación
+dolares_val <- dolares %>% 
+  slice_tail(n = 6)
+# 10 años de datos para modelar
+dolares_mod <- dolares %>%
+  filter(date>"2007-12-01" & date<="2020-01-01")
+
+# Objetos ts tanto para la serie completa como para la serie de modelado
+dolares_ts_full <- ts(dolares$value, start = c(2001,2), frequency = 12)
+dolares_ts <- ts(dolares_mod$value, start = c(2008,1), frequency = 12)
+dolares_ts_val <- ts(tail(dolares_ts_full, 6), start = c(2020,2), frequency = 12)
+
+# Colones
+
+# 6 periodos para utilizar a modo de validación
+colones_val <- colones %>% 
+  slice_tail(n = 6)
+
+# 10 años de datos para modelar
+colones_mod <- colones %>%
+  filter(date>"2007-12-01" & date<="2020-01-01")
+
+# Objetos ts tanto para la serie completa como para la serie de modelado
+colones_ts_full <- ts(colones$value, start = c(2001,2), frequency = 12)
+colones_ts <- ts(colones_mod$value, start = c(2008,1), frequency = 12)
+colones_ts_val <- ts(tail(colones_ts_full, 6), start = c(2020,2), frequency = 12)
+
+```
+
+
+# 2. Añadiendo variables de tiempo
+```{r}
+train_tbl <- dolares %>% filter(date < ymd("2020-02-01"))
+
+recipe_spec_timeseries <- recipe(value ~ ., data = train_tbl) %>%
+    step_timeseries_signature(date) 
+```
+
+```{r}
+recipe_spec_final <- recipe_spec_timeseries %>%
+    step_rm(date) %>%
+    step_rm(contains("iso"), 
+            contains("second"), contains("minute"), contains("hour"),
+            contains("am.pm"), contains("xts"), contains("week"),
+            contains("day"), contains("wday")) %>%
+    step_normalize(contains("index.num"), date_year) %>%
+    step_dummy(contains("lbl"), one_hot = TRUE) 
+
+```
+
+
+## 2.2 Datos con rezago (1, 3 y 6 meses)
+```{r}
+
+test_data_decomp_col <-
+  bake(prep(recipe_spec_final), new_data = colones %>%
+         bind_rows(tibble(
+           date = seq(ymd('2020-08-01'), ymd('2020-12-01'), by = 'month'),
+           value = rep(NA, 5)
+         )))  %>%
+  mutate(
+    lag1 = lag(value, 1),
+    lag3 = lag(value, 3),
+    lag6 = lag(value, 6),
+    lag12 = lag(value, 12)
+  ) %>%
+  filter(!is.na(lag12)) %>%
+  mutate(lag1 = if_else(is.na(lag1),lag(value,14)*1.2,lag1),
+         lag3 = if_else(is.na(lag3),lag(value,15)*1.2,lag3)
+         ) %>% 
+  slice((n() -10):n())
+  
+test_data_decomp_dol <-
+  bake(prep(recipe_spec_final), new_data = dolares %>%
+         bind_rows(tibble(
+           date = seq(ymd('2020-08-01'), ymd('2020-12-01'), by = 'month'),
+           value = rep(NA, 5)
+         )))  %>%
+  mutate(
+    lag1 = lag(value, 1),
+    lag3 = lag(value, 3),
+    lag6 = lag(value, 6),
+    lag12 = lag(value, 12)
+  ) %>%
+  filter(!is.na(lag12)) %>%
+  mutate(lag1 = if_else(is.na(lag1),lag(value,14)*1.15,lag1),
+         lag3 = if_else(is.na(lag3),lag(value,15)*1.15,lag3)
+         ) %>% 
+  slice((n() -10):n())
+  
+head(test_data_decomp_col)
+head(test_data_decomp_dol)
+```
+
+# Carga de los modelos
+
+```{r}
+
+lineal_dol = readRDS(paste0(modelos, "/modelo_lineal_dolares.Rds"))
+no_lineal_dol = readRDS(paste0(modelos, "/modelo_no_lineal_dolares.Rds"))
+mod_ml_dol = readRDS(paste0(modelos, "/modelo_ml_dolares.Rds"))
+
+lineal_col = readRDS(paste0(modelos, "/modelo_lineal_colones.Rds"))
+no_lineal_col = readRDS(paste0(modelos, "/modelo_no_lineal_colones.Rds"))
+mod_ml_col = readRDS(paste0(modelos, "/modelo_ml_colones.Rds"))
+
+```
+
+# Colones
+
+## Predicciones 
+
+```{r}
+# prediccion modelo lineal (HW)
+pred_lineal_col <- forecast(colones_ts, h =11, model = lineal_col)
+p_lineal_col = ts(
+    window(ts(pred_lineal_col$mean), start = 1, end = 11),
+    frequency = 12,
+    start = c(2020, 2)
+  )
+
+
+# Prediccion modelo no lineal (aar)
+pred_no_lineal_col <- predict(no_lineal_col, n.ahead=11) 
+
+p_no_lineal_col <-
+  exp(
+      log(colones_ts[145]) + cumsum(pred_no_lineal_col$mean)
+    )
+
+p_no_lineal_col = ts(
+  p_no_lineal_col,
+  frequency = 12,
+  start = c(2020, 2),
+  end = c(2020, 12)
+)
+
+
+# Prediccion modelo ML (glmnet)
+
+#test.task.decomp = makeRegrTask(data = test_data_decomp, target = "value")
+glmnet_predict_test_col <- predict(mod_ml_col, newdata = test_data_decomp_col %>% select(-value))
+p_ml_col <-  ts(
+    glmnet_predict_test_col$data$response,
+    frequency = 12,
+    start = c(2020, 2),
+    end = c(2020, 12)
+  )
+
+
+```
+
+## Comparacion de modelo
+
+```{r}
+
+todos_preds_col <- cbind(
+  Serie = colones_ts ,
+  Real = colones_ts_val,
+  Prediccion1 = p_lineal_col,
+  Prediccion2 = p_no_lineal_col,
+  Prediccion3 = p_ml_col
+)
+
+# Graficamos
+dygraph(todos_preds_col, main = "Predicción mejores modelos (Colones)") %>%
+dySeries("Serie", label = "Entrenamiento") %>%
+dySeries("Real", label = "Prueba") %>%
+dySeries("Prediccion1", label = "Lineal (ARIMA)") %>%
+dySeries("Prediccion2", label = "No lineal (Red neuronal)") %>%
+dySeries("Prediccion3", label = "ML (glmnet)") %>%
+dyAxis("x", label = "Meses") %>% 
+dyAxis("y", label = "Montos (col)") %>% 
+dyOptions(colors = RColorBrewer::brewer.pal(7, "Set1")) %>% 
+dyRangeSelector()
+
+
+acc_todos_col <- tibble( Metodo = c("Lineal (ARIMA)","No lineal (Red neuronal)","ML (glmnet)"),
+        RMSE = round(c(
+                       forecast::accuracy(p_lineal_col, colones_ts_val)[2],
+                       forecast::accuracy(p_no_lineal_col, colones_ts_val)[2],
+                       forecast::accuracy(p_ml_col, colones_ts_val)[2]),3),
+        MAE = round(c(
+                       forecast::accuracy(p_lineal_col, colones_ts_val)[3],
+                       forecast::accuracy(p_no_lineal_col, colones_ts_val)[3],
+                       forecast::accuracy(p_ml_col, colones_ts_val)[3]),3),
+        MAPE = round(c(
+                       forecast::accuracy(p_lineal_col, colones_ts_val)[5],
+                       forecast::accuracy(p_no_lineal_col, colones_ts_val)[5],
+                       forecast::accuracy(p_ml_col, colones_ts_val)[5]),3)
+        
+        ) 
+
+acc_todos_col %>% 
+  mutate_if(is.numeric, function(x) {
+    cell_spec(x, bold = T, 
+              color = spec_color(x, end = 0.9, direction = -1),
+              font_size = spec_font_size(x, begin = 12,end = 14, scale_from = NA))
+  }) %>%
+  kable(escape = F, caption = "Medidas de ajuste (Todos los modelos)", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+
+# Dolares
+
+## Predicciones 
+
+```{r}
+# prediccion modelo lineal (HW)
+pred_lineal_dol <- forecast(lineal_dol, h = 11)
+p_lineal_dol = ts(
+    window(ts(pred_lineal_dol$mean), start = 1, end = 11),
+    frequency = 12,
+    start = c(2020, 2)
+  )
+
+
+# Prediccion modelo no lineal (aar)
+pred_no_lineal_dol <- predict(no_lineal_dol, n.ahead=11) 
+
+p_no_lineal_dol <-
+  exp(
+      log(dolares_ts[145]) + cumsum(pred_no_lineal_dol)
+    )
+
+p_no_lineal_dol = ts(
+  p_no_lineal_dol,
+  frequency = 12,
+  start = c(2020, 2),
+  end = c(2020, 12)
+)
+
+
+# Prediccion modelo ML (glmnet)
+
+#test.task.decomp = makeRegrTask(data = test_data_decomp, target = "value")
+glmnet_predict_test_dol <- predict(mod_ml_dol, newdata = test_data_decomp_dol %>% select(-value))
+p_ml_dol <-  ts(
+    glmnet_predict_test_dol$data$response,
+    frequency = 12,
+    start = c(2020, 2),
+    end = c(2020, 12)
+  )
+
+
+```
+
+## Comparacion de modelo
+
+```{r}
+
+todos_preds_dol <- cbind(
+  Serie = dolares_ts ,
+  Real = dolares_ts_val,
+  Prediccion1 = p_lineal_dol,
+  Prediccion2 = p_no_lineal_dol,
+  Prediccion3 = p_ml_dol
+)
+
+# Graficamos
+dygraph(todos_preds_dol, main = "Predicción mejores modelos") %>%
+dySeries("Serie", label = "Entrenamiento") %>%
+dySeries("Real", label = "Prueba") %>%
+dySeries("Prediccion1", label = "Lineal (HW)") %>%
+dySeries("Prediccion2", label = "No lineal (AAR)") %>%
+dySeries("Prediccion3", label = "ML (glmnet)") %>%
+dyAxis("x", label = "Meses") %>% 
+dyAxis("y", label = "Montos (Dol)") %>% 
+dyOptions(colors = RColorBrewer::brewer.pal(7, "Set1")) %>% 
+dyRangeSelector()
+
+
+acc_todos_dol <- tibble( Metodo = c("Lineal (HW)","No lineal (AAR)","ML (glmnet)"),
+        RMSE = round(c(
+                       forecast::accuracy(p_lineal_dol, dolares_ts_val)[2],
+                       forecast::accuracy(p_no_lineal_dol, dolares_ts_val)[2],
+                       forecast::accuracy(p_ml_dol, dolares_ts_val)[2]),3),
+        MAE = round(c(
+                       forecast::accuracy(p_lineal_dol, dolares_ts_val)[3],
+                       forecast::accuracy(p_no_lineal_dol, dolares_ts_val)[3],
+                       forecast::accuracy(p_ml_dol, dolares_ts_val)[3]),3),
+        MAPE = round(c(
+                       forecast::accuracy(p_lineal_dol, dolares_ts_val)[5],
+                       forecast::accuracy(p_no_lineal_dol, dolares_ts_val)[5],
+                       forecast::accuracy(p_ml_dol, dolares_ts_val)[5]),3)
+        
+        ) 
+
+acc_todos_dol %>% 
+  mutate_if(is.numeric, function(x) {
+    cell_spec(x, bold = T, 
+              color = spec_color(x, end = 0.9, direction = -1),
+              font_size = spec_font_size(x, begin = 12,end = 14, scale_from = NA))
+  }) %>%
+  kable(escape = F, caption = "Medidas de ajuste (Todos los modelos)", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+
+```{r}
+
+saveRDS(todos_preds_col, paste0(final_data, "/predicciones_colones.Rds"))
+saveRDS(todos_preds_dol, paste0(final_data, "/predicciones_dolares.Rds"))
+
+```
+

@@ -144,15 +144,17 @@ head(train_data)
 train_data_decomp <- bake(prep(recipe_spec_final), new_data = dolares) %>% 
   mutate(lag1 = lag(value,1), 
          lag3 = lag(value,3),
-         lag6 = lag(value,6)) %>% 
-   filter(!is.na(lag6)) %>% 
+         lag6 = lag(value,6),
+         lag12 = lag(value,12)) %>% 
+   filter(!is.na(lag12)) %>% 
    slice(1:(n()-6))
 
 test_data_decomp <- bake(prep(recipe_spec_final), new_data = dolares)  %>% 
   mutate(lag1 = lag(value,1), 
          lag3 = lag(value,3),
-         lag6 = lag(value,6)) %>% 
-   filter(!is.na(lag6)) %>% 
+         lag6 = lag(value,6),
+         lag12 = lag(value,12)) %>% 
+   filter(!is.na(lag12)) %>% 
    slice((n()-5):n())
 
 head(train_data_decomp)
@@ -249,7 +251,7 @@ pred_train <- getBMRPredictions(bmr)
 
 pred_train$train_data_decomp$regr.gbm$data %>% 
   arrange(id) %>% 
-  mutate(date = train_tbl$date[-c(1:6)]) %>% 
+  mutate(date = train_tbl$date[-c(1:12)]) %>% 
   select(date, truth, response) %>% 
   pivot_longer(!date, names_to = "type", values_to = "value") %>% 
   ggplot(aes(x = date, y = value, color = type)) +
@@ -258,7 +260,7 @@ pred_train$train_data_decomp$regr.gbm$data %>%
 
 pred_train$train_data_decomp$regr.ranger$data %>% 
   arrange(id) %>% 
-  mutate(date = train_tbl$date[-c(1:6)]) %>% 
+  mutate(date = train_tbl$date[-c(1:12)]) %>% 
   select(date, truth, response) %>% 
   pivot_longer(!date, names_to = "type", values_to = "value") %>% 
   ggplot(aes(x = date, y = value, color = type)) +
@@ -267,7 +269,7 @@ pred_train$train_data_decomp$regr.ranger$data %>%
 
 pred_train$train_data_decomp$regr.glmnet$data %>% 
   arrange(id) %>% 
-  mutate(date = train_tbl$date[-c(1:6)]) %>% 
+  mutate(date = train_tbl$date[-c(1:12)]) %>% 
   select(date, truth, response) %>% 
   pivot_longer(!date, names_to = "type", values_to = "value") %>% 
   ggplot(aes(x = date, y = value, color = type)) +
@@ -419,13 +421,13 @@ todos_preds <- cbind(
 
 # Graficamos
 dygraph(todos_preds, main = "Predicción todos los modelos") %>%
-dySeries("Serie", label = "Cantidad") %>%
-dySeries("Real", label = "Real") %>%
+dySeries("Serie", label = "Entrenamiento") %>%
+dySeries("Real", label = "Prueba") %>%
 dySeries("Prediccion1", label = "Glm") %>%
 dySeries("Prediccion2", label = "GBM") %>%
 dySeries("Prediccion3", label = "RF") %>%
 dyAxis("x", label = "Meses") %>% 
-dyAxis("y", label = "Accidentes") %>% 
+dyAxis("y", label = "Montos (Dol)") %>% 
 dyOptions(colors = RColorBrewer::brewer.pal(7, "Set1")) %>% 
 dyRangeSelector()
 
