@@ -1,0 +1,195 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+library(here)
+library(readxl)
+
+library(kableExtra)
+library(lubridate)
+library(timetk) 
+library(dygraphs)
+library(tidyverse)
+```
+
+Rutas
+```{r}
+raw_data <- here("data", "raw")
+interim_data <- here("data", "interim")
+final_data <- here("data", "processed")
+modelos <- here('models')
+```
+
+Leyendo base de datos
+```{r}
+base <- read_excel(paste0(raw_data,"/Base Datos.xlsx"), 
+    col_types = c("text", "numeric", "numeric"))
+
+head(base)
+```
+
+Extrayendo la base de dolares y de dolares
+```{r}
+colones <- data_frame(date = base$`Activo neto`,
+                  value =  as.double(base$CRC)) %>%
+  mutate(date = ymd(paste0(date, "-01"))) 
+
+dolares <- data_frame(date = base$`Activo neto`,
+                  value =  as.double(base$USD)) %>%
+  mutate(date = ymd(paste0(date, "-01"))) 
+
+head(colones)
+head(dolares)
+```
+
+Cargando las proyecciones
+```{r}
+
+pred_colones <- readRDS(paste0(final_data, "/predicciones_colones.Rds"))
+pred_dolares <- readRDS(paste0(final_data, "/predicciones_dolares.Rds"))
+
+```
+
+
+# Serie colones
+```{r}
+
+colones %>% 
+  mutate(anno = year(date),
+         mes = month(date),
+         diff = value/lag(value,1)) %>% 
+  filter(anno > 2007 & mes == 12) %>% 
+  ggplot(aes(x = anno, y = diff))+
+  geom_col()#+
+
+
+```
+
+```{r}
+dat_diff_col <- colones %>%
+  select(date, value) %>% 
+  bind_rows(tibble(date = seq(ymd('2020-08-01'), ymd('2020-12-01'), by = 'month'),
+                   value = pred_colones[152:156,5])) %>% 
+  mutate(
+    anno = year(date),
+    mes = month(date),
+    diff = value / lag(value, 1)
+  ) %>%
+  filter(anno > 2001 ) %>%
+  select(anno, mes, diff) %>%
+  pivot_wider(names_from = mes, values_from = c( diff)) %>%
+  bind_cols(
+    colones %>%
+      select(date, value) %>% 
+  bind_rows(tibble(date = seq(ymd('2020-08-01'), ymd('2020-12-01'), by = 'month'),
+                   value = pred_colones[152:156,5])) %>% 
+      mutate(
+        anno = year(date),
+        mes = month(date),
+        diff = value / lag(value, 5)
+      ) %>%
+      filter(mes == 12 & anno > 2001) %>% 
+      select(diff)
+    
+  ) %>% 
+  select(-anno)
+
+dat_diff_col <- dat_diff_col %>% 
+  mutate(id = seq(2002, 2020)) %>% 
+  mutate(crisis = if_else(id %in% c(2008, 2014, 2020),1,0)) %>% 
+  select(-id)
+
+```
+
+
+```{r}
+
+train_col <- dat_diff_col %>% 
+  slice(1:(n()-1)) %>% 
+  mutate(diff = round(diff*100,0))
+
+test_col <- dat_diff_col %>% 
+  slice(n()) %>% 
+  mutate(diff = round(diff*100,0))
+
+mod_col <-lm(diff~., data = train_col)
+summary(mod_col)
+
+predict(mod_col, interval = 'confidence')
+predict(mod_col, newdata = test_col, interval = 'confidence')
+
+```
+
+
+
+# Serie dolares
+```{r}
+
+dolares %>% 
+  mutate(anno = year(date),
+         mes = month(date),
+         diff = value/lag(value,1)) %>% 
+  filter(anno > 2007 & mes == 12) %>% 
+  ggplot(aes(x = anno, y = diff))+
+  geom_col()#+
+
+
+```
+
+```{r}
+dat_diff_dol <- dolares %>%
+  select(date, value) %>% 
+  bind_rows(tibble(date = seq(ymd('2020-08-01'), ymd('2020-12-01'), by = 'month'),
+                   value = pred_dolares[152:156,5])) %>% 
+  mutate(
+    anno = year(date),
+    mes = month(date),
+    diff = value / lag(value, 1)
+  ) %>%
+  filter(anno > 2001 ) %>%
+  select(anno, mes, diff) %>%
+  pivot_wider(names_from = mes, values_from = c( diff)) %>%
+  bind_cols(
+    dolares %>%
+      select(date, value) %>% 
+  bind_rows(tibble(date = seq(ymd('2020-08-01'), ymd('2020-12-01'), by = 'month'),
+                   value = pred_dolares[152:156,5])) %>% 
+      mutate(
+        anno = year(date),
+        mes = month(date),
+        diff = value / lag(value, 5)
+      ) %>%
+      filter(mes == 12 & anno > 2001) %>% 
+      select(diff)
+    
+  ) %>% 
+  select(-anno)
+
+dat_diff_dol <- dat_diff_dol %>% 
+  mutate(id = seq(2002, 2020)) %>% 
+  mutate(crisis = if_else(id %in% c(2008, 2014, 2020),1,0)) %>% 
+  select(-id)
+
+```
+
+
+```{r}
+
+train_dol <- dat_diff_dol %>% 
+  slice(1:(n()-1)) %>% 
+  mutate(diff = round(diff*100,0))
+
+test_dol <- dat_diff_dol %>% 
+  slice(n()) %>% 
+  mutate(diff = round(diff*100,0))
+
+mod_dol <-lm(diff~., data = train_dol)
+summary(mod_dol)
+
+predict(mod_dol, interval = 'confidence')
+predict(mod_dol, newdata = test_dol, interval = 'confidence')
+
+```

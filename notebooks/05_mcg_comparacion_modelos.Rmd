@@ -182,7 +182,7 @@ pred_no_lineal_col <- predict(no_lineal_col, n.ahead=11)
 
 p_no_lineal_col <-
   exp(
-      log(colones_ts[145]) + cumsum(pred_no_lineal_col$mean)
+      log(colones_ts[145]) + cumsum(pred_no_lineal_col)
     )
 
 p_no_lineal_col = ts(
@@ -224,7 +224,7 @@ dygraph(todos_preds_col, main = "Predicción mejores modelos (Colones)") %>%
 dySeries("Serie", label = "Entrenamiento") %>%
 dySeries("Real", label = "Prueba") %>%
 dySeries("Prediccion1", label = "Lineal (ARIMA)") %>%
-dySeries("Prediccion2", label = "No lineal (Red neuronal)") %>%
+dySeries("Prediccion2", label = "No lineal (STAR)") %>%
 dySeries("Prediccion3", label = "ML (glmnet)") %>%
 dyAxis("x", label = "Meses") %>% 
 dyAxis("y", label = "Montos (col)") %>% 

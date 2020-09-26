@@ -415,7 +415,7 @@ En terminos de medidas de ajuste se puede discernir que el mejor modelo es el ST
 
 ```{r include=FALSE}
 
-saveRDS(nn_mod, file = paste0(modelos, "/modelo_no_lineal_colones.Rds"))
+saveRDS(star_mod, file = paste0(modelos, "/modelo_no_lineal_colones.Rds"))
 
 ```
 
